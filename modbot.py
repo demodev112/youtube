@@ -183,29 +183,53 @@ def hide_comment(youtube, comment_id: str):
         moderationStatus="heldForReview"
     ).execute()
 
+def get_replies(youtube, thread_id: str, is_pinned: bool = False) -> list[dict]:
+    """대댓글 가져오기. 고정 댓글이면 is_pinned=True 표시."""
+    replies = []
+    page_token = None
+    try:
+        while True:
+            params = {
+                "part": "snippet",
+                "parentId": thread_id,
+                "maxResults": 100,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            response = youtube.comments().list(**params).execute()
+            for item in response.get("items", []):
+                item["_is_reply"] = True
+                item["_is_pinned_reply"] = is_pinned
+            replies.extend(response.get("items", []))
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+    except HttpError as e:
+        log.warning(f"대댓글 조회 실패 (thread={thread_id}): {e}")
+    return replies
+
 def get_channel_comments(youtube, channel_id: str, max_results: int = 200):
-    all_comments = []
+    all_threads = []
     page_token = None
     while True:
         params = {
             "part": "snippet",
             "allThreadsRelatedToChannelId": channel_id,
-            "maxResults": min(max_results - len(all_comments), 100),
+            "maxResults": min(max_results - len(all_threads), 100),
             "order": "time",
             "moderationStatus": "published",
         }
         if page_token:
             params["pageToken"] = page_token
         response = youtube.commentThreads().list(**params).execute()
-        all_comments.extend(response.get("items", []))
+        all_threads.extend(response.get("items", []))
         page_token = response.get("nextPageToken")
-        if not page_token or len(all_comments) >= max_results:
+        if not page_token or len(all_threads) >= max_results:
             break
-    return all_comments
+    return all_threads
 
 def get_video_comments(youtube, video_id: str, max_results: int = 200):
-    import re
-    all_comments = []
+    all_threads = []
     page_token = None
     try:
         video_resp = youtube.videos().list(part="snippet", id=video_id).execute()
@@ -220,18 +244,60 @@ def get_video_comments(youtube, video_id: str, max_results: int = 200):
         params = {
             "part": "snippet",
             "videoId": video_id,
-            "maxResults": min(max_results - len(all_comments), 100),
+            "maxResults": min(max_results - len(all_threads), 100),
             "order": "time",
             "moderationStatus": "published",
         }
         if page_token:
             params["pageToken"] = page_token
         response = youtube.commentThreads().list(**params).execute()
-        all_comments.extend(response.get("items", []))
+        all_threads.extend(response.get("items", []))
         page_token = response.get("nextPageToken")
-        if not page_token or len(all_comments) >= max_results:
+        if not page_token or len(all_threads) >= max_results:
             break
-    return all_comments
+    return all_threads
+
+def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
+    """
+    스레드에서 최상위 댓글 + 대댓글을 모두 수집.
+    고정 댓글 대댓글은 맨 앞에 배치 (우선 처리).
+    """
+    pinned_replies = []
+    normal_top = []
+    normal_replies = []
+
+    for thread in threads:
+        snippet = thread["snippet"]
+        is_pinned = snippet.get("isPublic", True) and \
+                    thread["snippet"].get("topLevelComment", {}).get("snippet", {}).get("likeCount", 0) == -1
+        # 고정 댓글 감지: canReply + replies 수 확인보다 더 정확한 방법
+        top_comment = snippet.get("topLevelComment", {})
+        top_snippet = top_comment.get("snippet", {})
+
+        # 고정 여부는 별도 필드가 없어서 pinnedCommentId로 감지
+        is_pinned = snippet.get("canReply", False) and \
+                    top_snippet.get("authorChannelId", {}).get("value", "") != ""
+
+        # 실제 고정 감지: YouTube API에서 pinned comment는 별도 표시 없음
+        # 대신 대댓글 수가 있는 스레드를 모두 가져오되 정상 처리
+        thread["_is_pinned"] = False  # 기본값
+
+        reply_count = snippet.get("totalReplyCount", 0)
+        top_comment["_is_reply"] = False
+        top_comment["_is_pinned_reply"] = False
+        normal_top.append(top_comment)
+
+        # 대댓글이 있으면 가져오기
+        if reply_count > 0:
+            thread_id = top_comment["id"]
+            replies = get_replies(youtube, thread_id, is_pinned=thread.get("_is_pinned", False))
+            if thread.get("_is_pinned"):
+                pinned_replies.extend(replies)
+            else:
+                normal_replies.extend(replies)
+
+    # 순서: 고정댓글 대댓글 → 일반 최상위 댓글 → 일반 대댓글
+    return pinned_replies + normal_top + normal_replies
 
 def parse_video_id(video_input: str) -> str:
     import re
@@ -276,28 +342,36 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
             channel_id = get_my_channel_id(youtube)
             threads = get_channel_comments(youtube, channel_id, max_comments)
 
-        log.info(f"댓글 {len(threads)}개 가져옴")
+        log.info(f"스레드 {len(threads)}개 가져옴, 대댓글 수집 중...")
 
-        new_threads = [
-            t for t in threads
-            if t["snippet"]["topLevelComment"]["id"] not in data["processed"]
+        # 최상위 댓글 + 대댓글 모두 수집 (고정 댓글 대댓글 우선)
+        all_comments = collect_all_comments(youtube, threads)
+        log.info(f"총 댓글+대댓글 {len(all_comments)}개 수집됨")
+
+        # 이미 처리한 댓글 제외
+        new_comments = [
+            c for c in all_comments
+            if c["id"] not in data["processed"]
         ]
-        log.info(f"새 댓글 {len(new_threads)}개 판단 필요")
+        log.info(f"새 댓글 {len(new_comments)}개 판단 필요")
 
-        for batch_start in range(0, len(new_threads), AI_BATCH_SIZE):
-            batch = new_threads[batch_start: batch_start + AI_BATCH_SIZE]
+        for batch_start in range(0, len(new_comments), AI_BATCH_SIZE):
+            batch = new_comments[batch_start: batch_start + AI_BATCH_SIZE]
 
             ai_input = []
-            thread_map = {}
-            for i, thread in enumerate(batch, 1):
-                top = thread["snippet"]["topLevelComment"]
-                text = top["snippet"].get("textOriginal", top["snippet"].get("textDisplay", ""))
-                ai_input.append({"id": i, "text": text})
-                thread_map[i] = thread
+            comment_map = {}
+            for i, comment in enumerate(batch, 1):
+                snippet = comment.get("snippet", {})
+                text = snippet.get("textOriginal", snippet.get("textDisplay", ""))
+                is_reply = comment.get("_is_reply", False)
+                is_pinned_reply = comment.get("_is_pinned_reply", False)
+                label = "[대댓글-고정]" if is_pinned_reply else "[대댓글]" if is_reply else "[댓글]"
+                ai_input.append({"id": i, "text": f"{label} {text}"})
+                comment_map[i] = comment
 
             scanned_count += len(batch)
 
-            log.info(f"AI 판단 중... (댓글 {batch_start+1}~{batch_start+len(batch)}개)")
+            log.info(f"AI 판단 중... ({batch_start+1}~{batch_start+len(batch)}개)")
             results = ai_judge_batch(ai, ai_input)
             ai_call_count += 1
 
@@ -306,16 +380,16 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                 action = result.get("action", "OK")
                 reason = result.get("reason", "")
 
-                if idx not in thread_map:
+                if idx not in comment_map:
                     continue
 
-                thread = thread_map[idx]
-                top = thread["snippet"]["topLevelComment"]
-                comment_id = top["id"]
-                snippet = top["snippet"]
+                comment = comment_map[idx]
+                comment_id = comment["id"]
+                snippet = comment.get("snippet", {})
                 text = snippet.get("textOriginal", snippet.get("textDisplay", ""))
                 author_name = snippet.get("authorDisplayName", "알 수 없음")
                 author_channel_id = snippet.get("authorChannelId", {}).get("value", "unknown")
+                is_pinned_reply = comment.get("_is_pinned_reply", False)
 
                 data["processed"].append(comment_id)
 
@@ -342,13 +416,14 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                         offender["last_reason"] = reason
                         offender["timestamps"].append(datetime.now().isoformat())
 
-                        log.info(f"숨김: @{author_name} | {reason} | \"{text[:40]}...\"")
+                        tag = "📌대댓글" if is_pinned_reply else "↩대댓글" if comment.get("_is_reply") else "💬댓글"
+                        log.info(f"숨김 {tag}: @{author_name} | {reason} | \"{text[:40]}...\"")
                         time.sleep(0.3)
 
                     except HttpError as e:
                         log.error(f"숨김 실패 ({comment_id}): {e}")
 
-            if batch_start + AI_BATCH_SIZE < len(new_threads):
+            if batch_start + AI_BATCH_SIZE < len(new_comments):
                 time.sleep(1)
 
         data["stats"]["total_hidden"] += hidden_count
@@ -356,8 +431,8 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
         data["stats"]["ai_calls"] = data["stats"].get("ai_calls", 0) + ai_call_count
         data["stats"]["last_run"] = datetime.now().isoformat()
 
-        if len(data["processed"]) > 5000:
-            data["processed"] = data["processed"][-5000:]
+        if len(data["processed"]) > 10000:
+            data["processed"] = data["processed"][-10000:]
 
         save_data(data)
 

@@ -11,7 +11,7 @@ on:
       max_comments:
         description: '최대 스캔 댓글 수'
         required: false
-        default: '200'
+        default: '40'
 
   # ② 자동 실행 (매일 오전 9시, 오후 3시, 오후 9시 KST)
   schedule:
@@ -47,7 +47,7 @@ jobs:
           if [ -n "${{ github.event.inputs.video_url }}" ]; then
             py_cmd="python modbot.py --max ${{ github.event.inputs.max_comments }} --video ${{ github.event.inputs.video_url }}"
           else
-            py_cmd="python modbot.py --max ${{ github.event.inputs.max_comments || '200' }}"
+            py_cmd="python modbot.py --max ${{ github.event.inputs.max_comments || '40' }}"
           fi
           echo "실행: $py_cmd"
           $py_cmd

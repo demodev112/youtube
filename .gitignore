@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.pyc
+
+# 봇 실행 결과물 / 인증 정보 (저장소에 올리지 않음)
+modbot.log
+offender_data.json
+token.json
+client_secrets.json

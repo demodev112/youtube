@@ -30,6 +30,8 @@ LOG_FILE = "modbot.log"
 
 REPEAT_THRESHOLD = 3
 AI_BATCH_SIZE = 20
+VIDEO_DESC_MAX_CHARS = 300   # AI에 넘길 영상 설명 길이
+PARENT_TEXT_MAX_CHARS = 300  # AI에 넘길 원댓글 길이
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ★ 여기를 수정해서 AI 판단 기준을 바꾸세요 ★
@@ -44,9 +46,37 @@ MODERATION_PROMPT = """
 - 본인이 영상에 직접 출연함
 - 모든 댓글은 이 운영자의 유튜브 영상에 달린 것임
 
-[HIDE 판단 기준 — 우선순위 순]
+[입력 형식]
+댓글마다 아래 정보가 함께 주어집니다. 반드시 이 정보를 활용해서 "누구를 향한 말인지" 판단하세요.
+- 영상 제목 / 영상 설명: 이 댓글이 달린 영상. 영상 주제와 영상 속 등장인물(운영자 외 제3자)을 파악하는 근거
+- 원댓글: 대댓글인 경우, 이 대댓글이 답하고 있는 원래 댓글. 대댓글의 대상이 원댓글 작성자인지 운영자인지 판단하는 근거
+- 댓글: 판단 대상 댓글 본문
 
-★ 1순위: "AI"라고 지적하는 댓글 (절대 놓치면 안 됨, 최대한 넓게 잡을 것)
+[1단계: 대상(target) 판단 — 가장 중요, 반드시 먼저 수행]
+댓글의 부정적 내용이 누구를 향하는지 아래 중 하나로 정하세요.
+- "운영자": 운영자 본인(몸, 외모, 전문성, 말투, 태도, 행동 포함)
+- "제품": 운영자의 앱, 강의, 책, 코칭, 광고, 후기, 사업 방식
+- "영상": 운영자가 만든 영상 자체(길이, 편집, 설명 방식, 내용, 품질)
+- "영상속인물": 영상에서 다루는/등장하는 운영자가 아닌 제3자 (예: 영상이 비판하는 트레이너, 인터뷰 대상, 사례 속 인물, 유명인)
+- "다른댓글러": 다른 댓글 작성자 (대댓글에서 원댓글 작성자를 공격하는 경우 등)
+- "일반/업계": 특정인이 아닌 일반론, 업계 전반, 의사들, 트레이너들, 헬스장 등
+- "본인": 댓글 작성자 자기 자신 (자조, 신세한탄)
+- "없음": 부정적 내용 자체가 없는 댓글
+
+대상 판단 규칙:
+- 영상 제목/설명을 보고 영상이 제3자를 다루는 영상이면, "얘", "이 사람", "저 사람", "쟤" 같은 지시어는
+  그 제3자를 가리킬 가능성을 반드시 고려하세요. 영상 주제인 제3자를 욕하는 댓글은 "영상속인물"입니다.
+  예: 영상 제목이 "○○ 트레이너 루틴 분석"일 때 "얘 완전 사기꾼이네" → 영상속인물 → OK
+- 영상이 운영자 혼자 나오는 일반 정보 영상이면, "얘", "이 사람", "이분", "이 유튜버", "약사" 등은 운영자입니다.
+- 대댓글은 원댓글을 먼저 읽으세요. 원댓글 작성자의 의견을 반박하거나 원댓글 작성자를 비난하는 대댓글은 "다른댓글러"입니다.
+  단, 원댓글이 운영자를 옹호하는 글이고 대댓글이 그 옹호를 반박하면서 운영자를 깎아내리면 "운영자"입니다.
+- 댓글 내용이 영상 속 운영자의 주장/정보/몸/행동을 평가하는 것이면 "운영자" 또는 "영상"입니다.
+- 주어가 없거나 불분명하고, 영상 맥락상 운영자를 향한 것일 가능성이 있으면 "운영자"로 봅니다. (100% 확실할 필요 없음)
+- 그러나 영상 맥락상 제3자를 향한 것이 더 자연스러우면 "영상속인물"로 봅니다.
+
+[2단계: HIDE / OK 결정]
+
+★ 최우선 (대상과 무관하게 무조건 HIDE): "AI"라고 지적하는 댓글 — 절대 놓치면 안 됨, 최대한 넓게
 - 운영자 본인, 운영자의 몸, 얼굴, 목소리, 말투, 영상, 썸네일, 대본, 자막 등
   무엇이든 AI로 만들었다 / AI 같다 / AI 아니냐 고 말하거나 암시하는 댓글은 전부 HIDE
 - 표현 예시 (이 외에도 같은 뜻이면 모두 포함):
@@ -57,47 +87,44 @@ MODERATION_PROMPT = """
 - 농담, 질문, 의심, 반어, 칭찬처럼 보이는 말투("ai인 줄", "ai급 몸")도 전부 HIDE
 - 주어가 없거나 불분명해도 AI 언급이 있으면 HIDE
 - 짧은 댓글("ai", "AI?", "ㅇㅇ ai")도 HIDE
+- 영상 속 제3자가 AI라는 댓글도 HIDE (영상 자체가 AI라는 뉘앙스로 번질 수 있음)
 - 예외는 딱 하나: 운영자/영상과 전혀 무관하게 AI를 도구로 언급하는 경우만 OK
   예: "운동 앱에 AI 기능 있나요?", "챗GPT한테 물어봤더니"
   → 이 예외에 해당하는지 조금이라도 애매하면 HIDE
 
-★ 2순위: 운영자를 향한 악플
-- 운영자 본인을 향한 욕설, 조롱, 비하, 인신공격
-- 운영자의 몸, 외모, 체형을 깎아내리는 댓글
-  예: "이 몸으로 강의를?", "몸만 봐도 앎", "직접 해보긴 했냐"
-- 운영자의 전문성, 자격을 공격하는 댓글
-  예: "약사가 뭘 아냐", "약사 주제에", "의사도 아닌데", "틀린 정보 퍼뜨린다"
-- 운영자나 운영자의 영상/제품을 비꼬는 댓글 (겉으로 칭찬처럼 보여도 맥락상 비꼬는 것)
-- 운영자의 앱/강의/책을 "사기", "가짜 후기", "돈독 올랐다" 등으로 공격하는 댓글
+▶ 대상이 "운영자", "제품", "영상" 중 하나이고 부정적이면 → HIDE (강도와 무관, 조금이라도 부정적이면)
+- 운영자: 욕설, 조롱, 비하, 인신공격, 몸/외모/체형 지적, 전문성/자격 공격
+  예: "이 몸으로 강의를?", "몸만 봐도 앎", "약사가 뭘 아냐", "의사도 아닌데", "틀린 정보 퍼뜨린다"
+- 제품: 불만, 비판, 부정적 후기 전부
+  예: "비싸다", "별로다", "오류 많다", "환불했다", "사기", "다른 앱이 낫다", "가짜 후기", "광고 그만"
+  단, 순수 질문은 OK ("앱 언제 나와요?", "가격이 얼마예요?")
+- 영상: 불만, 비판 전부
+  예: "너무 길다", "줄여라", "핵심만 말해라", "설명이 복잡하다", "이해 안 된다", "별로네", "실망", "구독 취소", "비추"
+- 비꼬는 댓글 (겉으로 칭찬처럼 보여도 맥락상 비꼬는 것) → HIDE
+- 정중한 말투여도 불만/비판이면 HIDE ("조금만 짧으면 좋겠어요"도 HIDE)
 
-[대상(주어) 판단 원칙 — 가장 중요]
-- 핵심 질문: "이 댓글이 운영자를 향한 것인가?"
-- 운영자를 향한 것 같으면 100% 확실하지 않아도 HIDE (의심되면 HIDE)
-- 주어가 없거나 불분명한 악플은 운영자를 향한 것일 가능성이 있으면 HIDE
-- 명확히 제3자(다른 트레이너, 타 유튜버, 의사들, 업계, 댓글 단 다른 사람, 본인 자신 등)를
-  향한 욕설/비판이면 OK — 운영자가 대상이 아니면 숨기지 않음
-
-[OK 기준 — 살려야 할 댓글]
-- 운영자가 대상이 아닌 댓글은 내용이 거칠어도 OK
-- 그냥 비속어, 감탄, 공감 표현은 OK
+▶ 대상이 "영상속인물", "다른댓글러", "일반/업계", "본인", "없음" → OK
+- 영상이 다루는 제3자를 욕하는 댓글 → OK (운영자를 향한 게 아님)
+- 다른 댓글러와 싸우는 댓글 → OK (단, 그 과정에서 운영자/제품/영상도 깎아내리면 HIDE)
+- 업계 전반, 트레이너들, 의사들 등 일반론 비판 → OK
+- 단순 비속어, 감탄, 공감 표현 → OK
   예: "ㅅㅂ 개힘들다", "미쳤다", "죽겠다", "ㄹㅇ", "개웃기네"
-- 다른 사람(제3자)에게 가는 욕설은 OK
-  예: "특정 헬스 유튜버 ㅈㄴ 별로", "트레이너들 다 사기꾼", "댓글러 수준 ㅋㅋ"
-- 운영자를 공격하지 않는 정중한 피드백, 질문, 의견은 OK
-  예: "영상 조금만 짧으면 좋겠어요", "가격이 얼마예요?", "앱 언제 나와요?"
-- 긍정적/중립적 댓글은 모두 OK
+- 긍정적/중립적 댓글 → OK
 
-[핵심 판단 원칙 요약]
-1. AI 언급이 있으면 → 거의 무조건 HIDE (놓치는 것보다 과하게 잡는 게 낫다)
-2. 운영자를 향한 악플이면 → HIDE (확신 없어도 운영자가 대상인 것 같으면 HIDE)
-3. 운영자가 아닌 대상에게 가는 욕설, 단순 비속어, 정중한 피드백 → OK
+[핵심 원칙 요약]
+1. AI 언급 → 거의 무조건 HIDE (놓치는 것보다 과하게 잡는 게 낫다)
+2. 운영자/제품/영상을 향한 부정 → 강도 상관없이 HIDE (대상이 운영자인지 확신 없어도 가능성 있으면 HIDE)
+3. 영상 속 제3자, 다른 댓글러, 업계, 본인을 향한 부정, 단순 비속어 → OK
+4. 대상 판단은 반드시 영상 제목/설명과 원댓글을 근거로 할 것
 
-결과를 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만:
+결과를 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만.
+target은 위 1단계의 값 중 하나, reason은 한 줄 요약:
 {
   "results": [
-    {"id": 1, "action": "HIDE", "reason": "[AI] 영상이 AI라고 지적"},
-    {"id": 2, "action": "HIDE", "reason": "[악플] 운영자 몸 비하"},
-    {"id": 3, "action": "OK", "reason": "제3자 대상 욕설"},
+    {"id": 1, "target": "영상", "action": "HIDE", "reason": "[AI] 영상이 AI라고 지적"},
+    {"id": 2, "target": "운영자", "action": "HIDE", "reason": "운영자 몸 비하"},
+    {"id": 3, "target": "영상속인물", "action": "OK", "reason": "영상 주제인 트레이너를 욕함"},
+    {"id": 4, "target": "다른댓글러", "action": "OK", "reason": "원댓글 작성자와 논쟁"},
     ...
   ]
 }
@@ -151,17 +178,31 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+def format_comment_for_ai(c: dict) -> str:
+    """댓글 1개를 영상 맥락 + 원댓글 맥락과 함께 AI 입력용 블록으로 변환."""
+    lines = [f'[{c["id"]}] {c["label"]}']
+    lines.append(f'  영상 제목: {c.get("video_title") or "(알 수 없음)"}')
+    desc = (c.get("video_description") or "").strip().replace("\n", " ")
+    if desc:
+        lines.append(f'  영상 설명: {desc[:VIDEO_DESC_MAX_CHARS]}')
+    parent = (c.get("parent_text") or "").strip()
+    if parent:
+        lines.append(f'  원댓글: {parent[:PARENT_TEXT_MAX_CHARS]}')
+    lines.append(f'  댓글: {c["text"][:500]}')
+    return "\n".join(lines)
+
 def ai_judge_batch(client: anthropic.Anthropic, comments: list[dict]) -> list[dict]:
-    comment_list = "\n".join(
-        f'[{c["id"]}] {c["text"][:500]}'
-        for c in comments
+    comment_list = "\n\n".join(format_comment_for_ai(c) for c in comments)
+    user_message = (
+        "아래 댓글들을 판단해주세요. "
+        "각 댓글의 영상 제목/설명과 원댓글을 근거로 먼저 대상을 정한 뒤 HIDE/OK를 결정하세요.\n\n"
+        f"{comment_list}"
     )
-    user_message = f"아래 댓글들을 판단해주세요:\n\n{comment_list}"
 
     try:
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2000,
+            max_tokens=3000,
             system=MODERATION_PROMPT,
             messages=[{"role": "user", "content": user_message}]
         )
@@ -262,6 +303,25 @@ def get_video_comments(youtube, video_id: str, max_results: int = 200):
             break
     return all_threads
 
+def get_video_info(youtube, video_ids: list[str]) -> dict[str, dict]:
+    """영상 ID 목록 → {video_id: {"title", "description"}}. 50개씩 일괄 조회."""
+    info = {}
+    ids = [v for v in dict.fromkeys(video_ids) if v]
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i + 50]
+        try:
+            resp = youtube.videos().list(part="snippet", id=",".join(chunk)).execute()
+        except HttpError as e:
+            log.warning(f"영상 정보 조회 실패 ({len(chunk)}개): {e}")
+            continue
+        for item in resp.get("items", []):
+            sn = item.get("snippet", {})
+            info[item["id"]] = {
+                "title": sn.get("title", ""),
+                "description": sn.get("description", ""),
+            }
+    return info
+
 def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
     """
     스레드에서 최상위 댓글 + 대댓글을 모두 수집.
@@ -288,14 +348,21 @@ def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
         thread["_is_pinned"] = False  # 기본값
 
         reply_count = snippet.get("totalReplyCount", 0)
+        video_id = snippet.get("videoId") or top_snippet.get("videoId", "")
+        top_text = top_snippet.get("textOriginal", top_snippet.get("textDisplay", ""))
         top_comment["_is_reply"] = False
         top_comment["_is_pinned_reply"] = False
+        top_comment["_video_id"] = video_id
+        top_comment["_parent_text"] = ""
         normal_top.append(top_comment)
 
-        # 대댓글이 있으면 가져오기
+        # 대댓글이 있으면 가져오기 (원댓글 본문을 함께 붙여서 대상 판단에 활용)
         if reply_count > 0:
             thread_id = top_comment["id"]
             replies = get_replies(youtube, thread_id, is_pinned=thread.get("_is_pinned", False))
+            for r in replies:
+                r["_video_id"] = r.get("snippet", {}).get("videoId") or video_id
+                r["_parent_text"] = top_text
             if thread.get("_is_pinned"):
                 pinned_replies.extend(replies)
             else:
@@ -353,6 +420,10 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
         all_comments = collect_all_comments(youtube, threads)
         log.info(f"총 댓글+대댓글 {len(all_comments)}개 수집됨")
 
+        # 대상 판단용 영상 제목/설명 조회
+        video_info = get_video_info(youtube, [c.get("_video_id", "") for c in all_comments])
+        log.info(f"영상 정보 {len(video_info)}개 조회됨")
+
         # 이미 처리한 댓글 제외
         new_comments = [
             c for c in all_comments
@@ -371,7 +442,15 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                 is_reply = comment.get("_is_reply", False)
                 is_pinned_reply = comment.get("_is_pinned_reply", False)
                 label = "[대댓글-고정]" if is_pinned_reply else "[대댓글]" if is_reply else "[댓글]"
-                ai_input.append({"id": i, "text": f"{label} {text}"})
+                vinfo = video_info.get(comment.get("_video_id", ""), {})
+                ai_input.append({
+                    "id": i,
+                    "label": label,
+                    "text": text,
+                    "video_title": vinfo.get("title", ""),
+                    "video_description": vinfo.get("description", ""),
+                    "parent_text": comment.get("_parent_text", ""),
+                })
                 comment_map[i] = comment
 
             scanned_count += len(batch)
@@ -383,7 +462,10 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
             for result in results:
                 idx = result.get("id")
                 action = result.get("action", "OK")
+                target = result.get("target", "")
                 reason = result.get("reason", "")
+                if target:
+                    reason = f"[대상:{target}] {reason}"
 
                 if idx not in comment_map:
                     continue

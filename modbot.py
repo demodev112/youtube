@@ -31,9 +31,77 @@ LOG_FILE = "modbot.log"
 REPEAT_THRESHOLD = 3
 AI_BATCH_SIZE = 20
 PARENT_TEXT_MAX_CHARS = 300  # AI에 넘길 원댓글 길이
+PREV_REPLY_MAX_CHARS = 200   # 전용 규칙 영상에서 AI에 넘길 앞선 답글 1개당 길이
+PREV_REPLY_COUNT = 3         # 전용 규칙 영상에서 AI에 넘길 앞선 답글 개수
 
 AI_MODEL = "claude-opus-5-5"
 AI_EFFORT = "high"  # low / medium / high — 판단 깊이 (높을수록 느리고 비쌈)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ★ 특정 영상에만 적용되는 추가 규칙 ★
+# - key: 영상 ID (youtu.be/XXXX 또는 ?v=XXXX 의 XXXX)
+# - 해당 영상의 댓글은 별도 배치로 묶여서 기본 프롬프트 + 이 규칙으로 판단됨
+# - 다른 영상의 댓글에는 전혀 영향 없음
+# - 매 실행마다 자동 적용됨 (일회성 아님)
+# ──────────────────────────────────────────────────────────────────────────────
+VIDEO_SPECIFIC_RULES = {
+    "tIa6GD6MdH8": {
+        "title": "어깨 운동 딱 두개만 하세요 (안크면 버그입니다)",
+        "rules": """
+[이 영상 전용 규칙 — 위의 일반 규칙보다 우선함]
+
+이 영상은 "근육선생"(정형외과 의사)의 영상을 반박하는 영상입니다.
+- 근육선생의 주장: 체리피킹한 연구 몇 개를 근거로, 케이블 레터럴 레이즈는 어깨에 위험하고
+  삼각근이 아니라 회전근개만 쓰게 돼서 근성장에도 좋지 않으니 덤벨 레터럴 레이즈를 하라.
+- 운영자(급진적 과부하, 약사)의 입장: 위 주장을 반박함. 케이블 레터럴 레이즈는 문제없다.
+
+그래서 이 영상의 부정적 댓글은 "운영자를 향한 것"과 "근육선생을 향한 것"으로 나뉩니다.
+근육선생을 향한 부정적 댓글은 운영자에게 유리한 댓글이므로 절대 숨기면 안 됩니다.
+
+▶ 이 영상에서의 판단 기준: 부정적인지가 아니라 "부정의 대상이 누구인지"로 결정
+- 대상이 운영자, 운영자 채널, 이 영상의 주장(케이블 레터럴 레이즈 옹호) → HIDE (평소와 동일)
+- 대상이 근육선생, 근육선생의 영상, 근육선생의 주장 → OK (숨기지 않음)
+- 둘 다 비판 ("둘 다 별로", "둘 다 어그로") → HIDE
+- 대상을 끝내 판단할 수 없음 → OK (숨기지 않음)
+  ※ 일반 규칙의 "주어 없는 부정 → 운영자로 간주 → HIDE"는 이 영상에서는 적용하지 않음
+  ※ 일반 규칙의 "자격/경력 의문 → HIDE"도 대상이 운영자일 때만 적용. 근육선생의 자격을 의심하면 OK
+  ※ AI 지적 규칙(★ 최우선)은 이 영상에서도 그대로 HIDE
+
+▶ 대상 판별 단서 ("그 사람", "이 사람", "저 사람" 같은 모호한 지칭이 많으니 아래를 종합)
+1. 이름/직업:
+   - "근육선생", "의사", "닥터", "전문의", "정형외과", "정형외과 의사", "의사 양반", "의사 선생" → 근육선생
+   - "급진적 과부하", "급진적과부하", "급과", "급진", "약사", "약사님", "주인장", "채널 주인", "영상 주인" → 운영자
+2. 입장 (가장 강력한 단서):
+   - 댓글이 비판하는 내용이 "케이블 레터럴 레이즈는 위험하다/효과 없다/회전근개만 쓴다/덤벨이 낫다" 쪽이면
+     → 그 주장을 한 근육선생을 비판하는 것 → 대상은 근육선생 → OK
+   - 그 주장을 옹호하거나, 운영자의 반박이 틀렸다/약사가 뭘 아냐/의사 말이 맞다 고 하면
+     → 대상은 운영자 → HIDE
+   - "연구 체리피킹", "논문 잘못 읽음", "어그로", "자극적 제목으로 낚시" 같은 비판은 원본 영상을 만든 근육선생 쪽이 기본값
+3. 지칭 기본값:
+   - 다른 단서 없는 "이 사람"은 보통 영상 주인인 운영자
+   - 단, "의사"라는 언급이나 "케이블 레터럴 레이즈 반대" 입장과 함께 쓰였으면 근육선생
+4. 답글: 원댓글과 앞선 답글을 함께 읽고 누구 얘기 중인지 확인
+   - 원댓글이 근육선생을 비판하는 글이면 그에 동조하는 답글의 "그 사람"도 근육선생
+   - 원댓글이 운영자를 비판하는 글이면 그에 동조하는 답글의 "그 사람"도 운영자
+5. 비교/편들기:
+   - "의사가 약사보다 낫다/똑똑하다", "전문가 말을 들어라"처럼 근육선생 편을 들며 운영자를 깎으면 → HIDE
+   - "약사가 의사보다 논문 잘 읽네"처럼 운영자 편을 들며 근육선생을 깎으면 → OK
+
+▶ 예시
+- "그 사람 그냥 어그로 끄는 듯" → 어그로를 끈 쪽은 원본 영상의 근육선생 → OK
+- "의사라는 사람이 논문을 저렇게 읽나" → 근육선생 비판 → OK
+- "정형외과면 다냐 운동은 모르면서" → 근육선생 비판 → OK
+- "케이블이 위험하다는 건 진짜 헛소리" → 근육선생 주장 비판 → OK
+- "의사가 약사보다 똑똑하니까 그 사람이 맞음" → 근육선생 편 + 운영자 깎아내림 → HIDE
+- "급진적 과부하가 뭘 안다고 의사한테 훈수냐" → 운영자 비판 → HIDE
+- "약사가 정형외과 의사한테 어깨 얘기를 해?" → 운영자 비판 → HIDE
+- "둘 다 어그로 끄는 거 같은데" → 둘 다 비판 → HIDE
+- "별로네" (단서 없음) → 대상 판단 불가 → OK
+
+target 값은 "운영자" / "근육선생" / "둘다" / "판단불가" / "없음" 중 하나로 응답하세요.
+""",
+    },
+}
 
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)
 RESULT_SCHEMA = {
@@ -208,10 +276,19 @@ def format_comment_for_ai(c: dict) -> str:
     parent = (c.get("parent_text") or "").strip()
     if parent:
         lines.append(f'  원댓글: {parent[:PARENT_TEXT_MAX_CHARS]}')
+    prev = [p.strip() for p in (c.get("prev_replies") or []) if p and p.strip()]
+    if prev:
+        lines.append('  앞선 답글들:')
+        for p in prev:
+            lines.append(f'    - {p[:PREV_REPLY_MAX_CHARS]}')
     lines.append(f'  댓글: {c["text"][:500]}')
     return "\n".join(lines)
 
-def ai_judge_batch(client: anthropic.Anthropic, comments: list[dict]) -> list[dict]:
+def ai_judge_batch(client: anthropic.Anthropic, comments: list[dict], extra_rules: str = "") -> list[dict]:
+    """extra_rules 가 있으면 기본 프롬프트 뒤에 붙여서 그 배치에만 적용."""
+    system_prompt = MODERATION_PROMPT
+    if extra_rules:
+        system_prompt = MODERATION_PROMPT.rstrip() + "\n\n" + extra_rules.strip() + "\n"
     comment_list = "\n\n".join(format_comment_for_ai(c) for c in comments)
     user_message = (
         "아래 댓글들을 판단해주세요. "
@@ -224,7 +301,7 @@ def ai_judge_batch(client: anthropic.Anthropic, comments: list[dict]) -> list[di
         response = client.messages.create(
             model=AI_MODEL,
             max_tokens=8000,
-            system=MODERATION_PROMPT,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
             output_config={
                 "effort": AI_EFFORT,
@@ -387,9 +464,13 @@ def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
         if reply_count > 0:
             thread_id = top_comment["id"]
             replies = get_replies(youtube, thread_id, is_pinned=thread.get("_is_pinned", False))
+            prev_texts = []
             for r in replies:
                 r["_video_id"] = r.get("snippet", {}).get("videoId") or video_id
                 r["_parent_text"] = top_text
+                r["_prev_replies"] = prev_texts[-PREV_REPLY_COUNT:]
+                r_text = r.get("snippet", {}).get("textOriginal", r.get("snippet", {}).get("textDisplay", ""))
+                prev_texts = prev_texts + [r_text]
             if thread.get("_is_pinned"):
                 pinned_replies.extend(replies)
             else:
@@ -458,8 +539,24 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
         ]
         log.info(f"새 댓글 {len(new_comments)}개 판단 필요")
 
-        for batch_start in range(0, len(new_comments), AI_BATCH_SIZE):
-            batch = new_comments[batch_start: batch_start + AI_BATCH_SIZE]
+        # 영상별 전용 규칙이 있는 댓글은 따로 묶어서 그 규칙으로 판단 (기본 그룹 키: "")
+        groups: dict[str, list[dict]] = {}
+        for c in new_comments:
+            key = c.get("_video_id", "") if c.get("_video_id", "") in VIDEO_SPECIFIC_RULES else ""
+            groups.setdefault(key, []).append(c)
+        for key, cs in groups.items():
+            if key:
+                log.info(f"전용 규칙 적용 영상 {key} ({VIDEO_SPECIFIC_RULES[key]['title']}): 댓글 {len(cs)}개")
+
+        batches = []  # (group_key, batch_comments)
+        for key in sorted(groups, key=lambda k: (k != "", k)):
+            cs = groups[key]
+            for batch_start in range(0, len(cs), AI_BATCH_SIZE):
+                batches.append((key, cs[batch_start: batch_start + AI_BATCH_SIZE]))
+
+        done_count = 0
+        for batch_no, (group_key, batch) in enumerate(batches):
+            extra_rules = VIDEO_SPECIFIC_RULES[group_key]["rules"] if group_key else ""
 
             ai_input = []
             comment_map = {}
@@ -476,13 +573,17 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                     "text": text,
                     "video_title": vinfo.get("title", ""),
                     "parent_text": comment.get("_parent_text", ""),
+                    # 앞선 답글은 전용 규칙 영상에서만 전달 (다른 영상 동작 불변)
+                    "prev_replies": comment.get("_prev_replies", []) if group_key else [],
                 })
                 comment_map[i] = comment
 
             scanned_count += len(batch)
 
-            log.info(f"AI 판단 중... ({batch_start+1}~{batch_start+len(batch)}개)")
-            results = ai_judge_batch(ai, ai_input)
+            tag = f" [전용 규칙: {group_key}]" if group_key else ""
+            log.info(f"AI 판단 중... ({done_count+1}~{done_count+len(batch)}개){tag}")
+            done_count += len(batch)
+            results = ai_judge_batch(ai, ai_input, extra_rules=extra_rules)
             ai_call_count += 1
 
             for result in results:
@@ -536,7 +637,7 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                     except HttpError as e:
                         log.error(f"숨김 실패 ({comment_id}): {e}")
 
-            if batch_start + AI_BATCH_SIZE < len(new_comments):
+            if batch_no + 1 < len(batches):
                 time.sleep(1)
 
         data["stats"]["total_hidden"] += hidden_count

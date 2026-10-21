@@ -1,0 +1,46 @@
+name: 댓글 숨김 해제 (1회성)
+
+on:
+  workflow_dispatch:
+    inputs:
+      match:
+        description: '복구할 댓글 본문 일부. 여러 개는 | 로 구분'
+        required: true
+      max_threads:
+        description: '상태별로 훑을 최대 스레드 수'
+        required: false
+        default: '400'
+      dry_run:
+        description: 'true 면 찾기만 하고 바꾸지 않음'
+        required: false
+        default: 'false'
+
+jobs:
+  unhide:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: Google 인증 토큰 복원
+        run: |
+          echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
+
+      - name: 숨김 해제 실행
+        env:
+          MATCH: ${{ github.event.inputs.match }}
+          MAX_THREADS: ${{ github.event.inputs.max_threads }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          extra=""
+          if [ "$DRY_RUN" = "true" ]; then extra="--dry-run"; fi
+          python unhide.py --match "$MATCH" --max "${MAX_THREADS:-400}" $extra

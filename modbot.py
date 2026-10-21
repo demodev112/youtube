@@ -187,6 +187,13 @@ target 값은 "운영자" / "부분가동범위파" / "둘다" / "판단불가" 
     },
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# ★ 절대 숨기지 않을 댓글 ID ★
+# - 운영자가 직접 복구한 댓글. AI가 HIDE 로 판단해도 건너뜀
+# - unhide.py 실행 로그에 찍히는 ID 를 여기에 추가
+# ──────────────────────────────────────────────────────────────────────────────
+NEVER_HIDE_IDS = set()
+
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)
 RESULT_SCHEMA = {
     "type": "object",
@@ -691,6 +698,10 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                 is_pinned_reply = comment.get("_is_pinned_reply", False)
 
                 data["processed"].append(comment_id)
+
+                if action == "HIDE" and comment_id in NEVER_HIDE_IDS:
+                    log.info(f"건너뜀 (예외 목록): @{author_name} | \"{text[:40]}...\"")
+                    continue
 
                 if action == "HIDE":
                     try:

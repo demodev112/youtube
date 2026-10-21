@@ -32,19 +32,21 @@ REPEAT_THRESHOLD = 3   # 이 횟수 이상 숨겨진 사람을 "반복 악플러
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ★ 자동 차단 (채널에서 사용자 숨기기) ★
-# - AI가 숨긴 댓글마다 심각도(심각/경미)를 매김. 기준은 "비판의 대상이 명확한가"
-#   · 심각: 대상이 운영자/영상/제품으로 명확한 부정 (강도 무관. 영상 불만·편집 지적·제품 불만 포함),
-#           AI 관련 지적 전부
-#   · 경미: 대상이 모호한 것, 농담·장난, 단순 궁금증, 호의적 피드백
+# - AI가 숨긴 댓글마다 심각도(명백/심각/경미)를 매김
+#   · 명백: 운영자를 향한 명백한 악플 (몸·외모 비하, "약사 주제에" 류 자격 경멸, AI 단정·비판, 직접 욕설)
+#           → 엄격한 2차 검수(별도 AI 호출)에서 확정되면 1회 즉시 차단. 기각되면 "심각"으로 내림
+#   · 심각: 대상이 운영자/영상/제품으로 명확한 부정 (강도 무관. 영상 불만·편집 지적·제품 불만 포함)
+#           → 누적 BAN_THRESHOLD_SEVERE 회면 차단 (명백도 1회로 셈)
+#   · 경미: 대상이 모호한 것, 농담·장난, 단순 궁금증, 호의적 피드백 → 숨기기만, 차단 안 됨
 #   · 대상이 판단불가/없음 인데 숨긴 경우는 코드에서도 강제로 경미 처리
-# - "심각" 누적 횟수가 BAN_THRESHOLD_SEVERE 에 도달하면 그 댓글을 "거부" 처리하면서
-#   작성자를 채널에서 숨김 (YouTube API banAuthor). 이후 그 사람의 댓글은 YouTube가 자동으로 거름
-# - "경미"는 숨기기만 하고 차단 카운트에 넣지 않음 (몇 번이어도 차단 안 됨)
+# - 차단 = 그 댓글을 "거부" 처리하면서 작성자를 채널에서 숨김 (YouTube API banAuthor).
+#   이후 그 사람의 댓글은 YouTube가 자동으로 거름
 # - 스튜디오 → 설정 → 커뮤니티 → "채널에서 숨겨진 사용자" 에서 언제든 해제 가능
-# - 끄려면 AUTO_BAN = False
+# - 끄려면 AUTO_BAN = False / 1회 즉시 차단만 끄려면 BLATANT_INSTANT_BAN = False
 # ──────────────────────────────────────────────────────────────────────────────
 AUTO_BAN = True
 BAN_THRESHOLD_SEVERE = 2
+BLATANT_INSTANT_BAN = True
 
 AI_BATCH_SIZE = 20
 PARENT_TEXT_MAX_CHARS = 300  # AI에 넘길 원댓글 길이
@@ -227,7 +229,7 @@ RESULT_SCHEMA = {
                     "id": {"type": "integer"},
                     "target": {"type": "string"},
                     "action": {"type": "string", "enum": ["HIDE", "OK"]},
-                    "severity": {"type": "string", "enum": ["심각", "경미", "없음"]},
+                    "severity": {"type": "string", "enum": ["명백", "심각", "경미", "없음"]},
                     "reason": {"type": "string"},
                 },
                 "required": ["id", "target", "action", "severity", "reason"],
@@ -332,8 +334,29 @@ MODERATION_PROMPT = """
 5. 트레이너들/헬창들/유튜버들 같은 집단 일반론, 이름 명시된 제3자, 원댓글 작성자, 본인, 단순 비속어 → OK
 
 [심각도(severity) 판단 — HIDE 인 댓글마다 반드시 매길 것]
-심각도는 "이 사람을 채널에서 차단할 근거가 되는 댓글인가"의 기준입니다. 심각은 2회면 차단, 경미는 몇 번이어도 차단하지 않습니다.
-기준은 딱 하나, "비판의 대상이 명확한가" 입니다. 내용의 강도(욕설인지, 정중한지)는 기준이 아닙니다.
+심각도는 "이 사람을 채널에서 차단할 근거가 되는 댓글인가"의 기준입니다.
+명백은 1회 즉시 차단 후보(별도 검수를 한 번 더 거침), 심각은 2회면 차단, 경미는 몇 번이어도 차단하지 않습니다.
+심각/경미의 기준은 "비판의 대상이 명확한가" 이고, 명백은 그중에서도 아래 조건을 전부 충족하는 극히 일부입니다.
+
+▶ "명백" — 1회 즉시 차단 후보. 매우 까다롭게, 아래 세 조건을 "전부 확실하게" 충족할 때만
+  1. 대상이 운영자 본인임이 확실 (또는 운영자의 영상이 AI로 만들어졌다는 지적)
+     - 영상 속 다른 인물, 다른 유튜버·의사, 다른 댓글러, 집단 일반론, 작성자 본인일 가능성이 조금이라도 있으면 명백 아님
+     - 영상 전용 규칙이 있으면 반드시 반영 (예: 근육선생 반박 영상에서 "의사" 비하는 운영자 대상이 아님)
+  2. 적대적·비하 의도가 분명
+     - 농담, 장난, 친근한 놀림, 칭찬 섞인 말, 순수한 질문, 걱정, 조언, 정중한 피드백이면 명백 아님
+     - 반어인지 진심인지 애매하면 명백 아님
+  3. 내용이 아래 유형 중 하나
+     a. 몸·외모 비하 단정: "몸 구리네", "어깨 좁네", "가슴 작네", "어좁", "멸치네", "배 나왔네", "몸이 그게 뭐냐", "그 몸으로 뭘 가르쳐"
+     b. 직업·자격 경멸: "약사 주제에", "약사 따위가", "약사가 뭘 안다고", "자격도 없는 게", "의사도 아닌 게"
+     c. AI 단정·비판: "ai로 만든 영상", "ai로 딸깍", "gpt 돌려서 만든 거", "ai 목소리네", "ai가 대본 써줌", "이거 ai임", "몸 ai네"
+     d. 운영자를 향한 직접 욕설·인신공격: "병신", "등신", "사기꾼", "꺼져", "개소리 하네"
+  - 명백이 아닌 예 (이런 건 심각 또는 경미):
+    "ai 아님?" / "ai인 줄 ㅋㅋ 몸 너무 좋아서" (질문·칭찬 → 심각)
+    "약사세요?" (단순 궁금증 → 경미)
+    "몸이 좀 더 커지면 설득력 있을 듯" (조언 톤 → 심각)
+    "어깨 좁은 사람한테도 효과 있나요?" (일반 질문 → OK)
+    "저 사람 몸 별로네" (영상 속 다른 인물일 수 있음 → 심각 또는 경미)
+  - 원칙: 조금이라도 애매하면 명백이 아니라 심각. 명백을 남발하지 말 것
 
 ▶ "심각" — 부정·비판의 대상이 운영자 / 운영자의 영상 / 운영자의 제품으로 명확한 경우
 - 명확하다는 것은: 운영자를 가리키는 말(이 사람, 이분, 주인장, 약사, 너, 님, 형, @급진적_과부하 등)이 있거나,
@@ -341,9 +364,9 @@ MODERATION_PROMPT = """
 - 강도와 무관: 정중한 영상 불만("조금 길어요"), 편집 지적("1:12 편집 실수"), 제품 불만("책 리뉴얼 필요")도
   대상이 명확하면 전부 심각
 - 운영자의 전문성·자격·능력 부정, 몸·외모·목소리·발음 비하, 욕설·인신공격·조롱, 틀렸다/거짓말이다 단정,
-  약물·사기 등 진실성 공격 → 대상이 운영자이므로 당연히 심각
-- AI 관련 지적 전부(운영자/몸/영상이 AI다, AI 같다, AI로 만들었다, AI를 사용했다)는 주어가 없어도 무조건 심각
-  (AI 지적 댓글의 target 은 반드시 "운영자" 또는 "영상" 으로 표기할 것)
+  약물·사기 등 진실성 공격 → 대상이 운영자이므로 최소 심각 (위 명백 조건을 전부 충족하면 명백)
+- AI 관련 지적 전부(운영자/몸/영상이 AI다, AI 같다, AI로 만들었다, AI를 사용했다)는 주어가 없어도 최소 심각
+  (단정·비판이면 명백, 질문·농담·칭찬조면 심각. AI 지적 댓글의 target 은 반드시 "운영자" 또는 "영상" 으로 표기할 것)
 
 ▶ "경미" — 숨기지만 차단 근거는 아님
 - 대상이 모호한 경우: 주어가 없고, 내용만으로는 운영자를 향한 건지 다른 것(영상 속 제3자, 다른 댓글러, 일반론, 본인)을
@@ -353,11 +376,67 @@ MODERATION_PROMPT = """
 - 호의적인 피드백: 칭찬과 함께 가볍게 바라는 점을 말한 것. 예: "센세 감사합니다. 책도 좀 리뉴얼…"
 - target 이 "판단불가" 또는 "없음" 인데 HIDE 한 경우는 항상 경미
 
-▶ 판단 순서: 먼저 "대상이 명확한가?" → 명확하면 심각. 모호하면 → "농담/궁금증/호의인가?" → 경미.
+▶ 판단 순서: 먼저 "대상이 명확한가?" → 모호하면 경미 (농담·궁금증·호의도 경미).
+  명확하면 심각. 그중 명백 조건 세 가지를 전부 확실하게 충족하면 명백.
 ▶ action 이 OK 이면 severity 는 "없음"
 
-각 댓글마다 target(운영자/영상/제품/집단일반론/제3자/다른댓글러/본인/없음), action(HIDE/OK), severity(심각/경미/없음), reason(한 줄)을 응답하세요.
+각 댓글마다 target(운영자/영상/제품/집단일반론/제3자/다른댓글러/본인/없음), action(HIDE/OK), severity(명백/심각/경미/없음), reason(한 줄)을 응답하세요.
 """
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ★ "명백" 2차 검수 프롬프트 ★
+# 1차에서 "명백"으로 분류된 댓글만 별도 호출로 다시 확인. 여기서 확정돼야 1회 즉시 차단
+# ──────────────────────────────────────────────────────────────────────────────
+VERIFY_PROMPT = """
+당신은 유튜브 채널 운영자를 향한 "명백한 악플"만 골라내는 매우 엄격한 2차 검수자입니다.
+1차 판정에서 "명백(1회 즉시 차단)"으로 분류된 댓글들을 다시 검토합니다.
+차단은 작성자를 채널에서 영구히 숨기는 무거운 조치입니다. 억울한 차단이 생기면 안 됩니다.
+아래 조건을 전부 확실하게 충족할 때만 "명백"으로 확정하고, 하나라도 애매하면 "아님"으로 답하세요.
+1차 판정을 그대로 믿지 말고 댓글 원문과 맥락을 직접 읽고 판단하세요.
+
+[채널 운영자]
+- 채널명 "급진적 과부하". 약사이자 운동 유튜버. 본인이 영상에 직접 출연함
+- 운동 앱, 코칭 앱, 식단 앱, 운동 강의, 운동 책을 판매함
+
+[명백 확정 조건 — 세 가지 모두 충족해야 함]
+1. 대상: 운영자 본인임이 확실 (또는 운영자의 영상이 AI로 만들어졌다는 지적)
+   - 영상 속 다른 인물, 다른 유튜버·의사·트레이너, 다른 댓글러, 집단 일반론, 작성자 본인일 가능성이 조금이라도 있으면 아님
+   - 대댓글이면 원댓글·앞선 답글을 읽고 누구 얘기인지 확인. 다른 댓글러와의 말싸움이면 아님
+   - 영상 전용 규칙이 함께 주어지면 반드시 반영
+2. 의도: 적대적·비하 의도가 분명
+   - 농담, 장난, 친근한 놀림("형님 ㅋㅋ"), 칭찬 섞인 말, 순수한 질문, 걱정, 조언, 정중한 피드백이면 아님
+   - 반어인지 진심인지 애매하면 아님
+3. 유형: 아래 중 하나에 해당
+   a. 몸·외모 비하 단정 ("몸 구리네", "어깨 좁네", "가슴 작네", "멸치", "그 몸으로 뭘 가르쳐")
+   b. 직업·자격 경멸 ("약사 주제에", "약사 따위가", "약사가 뭘 안다고", "자격도 없는 게")
+   c. AI 단정·비판 ("ai로 만든 영상", "ai로 딸깍", "gpt 돌려서 만든 거", "ai 목소리", "이거 ai임")
+      단, "ai 아님?" 같은 질문이나 "ai인 줄 ㅋㅋ 몸 좋아서" 같은 칭찬조는 아님
+   d. 운영자를 향한 직접 욕설·인신공격 ("병신", "등신", "사기꾼", "꺼져")
+   - 영상 내용 반박, 영상 불만, 편집 지적, 제품 불만은 아무리 거칠어도 이 유형이 아님 → 아님
+
+각 댓글마다 verdict("명백" 또는 "아님")와 reason(한 줄)을 응답하세요.
+"""
+
+VERIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "verdict": {"type": "string", "enum": ["명백", "아님"]},
+                    "reason": {"type": "string"},
+                },
+                "required": ["id", "verdict", "reason"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["results"],
+    "additionalProperties": False,
+}
 # ──────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -469,6 +548,46 @@ def ai_judge_batch(client: anthropic.Anthropic, comments: list[dict], extra_rule
     except anthropic.APIError as e:
         log.error(f"Anthropic API 오류: {e}")
         return []
+
+def ai_verify_blatant(client: anthropic.Anthropic, candidates: list[dict], extra_rules: str = "") -> dict[int, tuple[str, str]]:
+    """1차에서 "명백"으로 분류된 댓글을 엄격하게 다시 검수.
+    반환: {id: (verdict, reason)}. 호출 실패 시 빈 dict → 아무도 즉시 차단되지 않음 (안전한 쪽으로 실패)."""
+    system_prompt = VERIFY_PROMPT
+    if extra_rules:
+        system_prompt = VERIFY_PROMPT.rstrip() + "\n\n[참고: 이 영상의 전용 규칙]\n" + extra_rules.strip() + "\n"
+    blocks = []
+    for c in candidates:
+        blocks.append(format_comment_for_ai(c) + f'\n  1차 판정 사유: {c.get("first_reason", "")}')
+    user_message = "아래 댓글들이 정말 운영자를 향한 명백한 악플인지 엄격하게 검수해주세요.\n\n" + "\n\n".join(blocks)
+
+    raw = ""
+    try:
+        response = client.messages.create(
+            model=AI_MODEL,
+            max_tokens=4000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+            output_config={
+                "effort": AI_EFFORT,
+                "format": {"type": "json_schema", "schema": VERIFY_SCHEMA},
+            },
+        )
+        if response.stop_reason == "refusal":
+            log.error("2차 검수 거부됨 (refusal) — 즉시 차단 없이 진행")
+            return {}
+        raw = "".join(b.text for b in response.content if b.type == "text").strip()
+        parsed = json.loads(raw)
+        return {
+            r["id"]: (r.get("verdict", "아님"), r.get("reason", ""))
+            for r in parsed.get("results", [])
+            if isinstance(r.get("id"), int)
+        }
+    except json.JSONDecodeError as e:
+        log.error(f"2차 검수 응답 파싱 실패: {e}\n응답: {raw[:200]}")
+        return {}
+    except anthropic.APIError as e:
+        log.error(f"2차 검수 API 오류: {e}")
+        return {}
 
 def hide_comment(youtube, comment_id: str):
     youtube.comments().setModerationStatus(
@@ -739,18 +858,51 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
             results = ai_judge_batch(ai, ai_input, extra_rules=extra_rules)
             ai_call_count += 1
 
+            # "명백" 후보는 2차 검수를 거친 뒤에만 즉시 차단
+            input_map = {d["id"]: d for d in ai_input}
+            blatant_candidates = []
+            for r in results:
+                rid = r.get("id")
+                if (
+                    r.get("action") == "HIDE"
+                    and r.get("severity") == "명백"
+                    and r.get("target") in ("운영자", "영상")
+                    and rid in input_map
+                    and rid in comment_map
+                    and comment_map[rid]["id"] not in NEVER_HIDE_IDS
+                ):
+                    blatant_candidates.append({**input_map[rid], "first_reason": r.get("reason", "")})
+            verdicts: dict[int, tuple[str, str]] = {}
+            if blatant_candidates and AUTO_BAN and BLATANT_INSTANT_BAN:
+                log.info(f"명백 후보 {len(blatant_candidates)}개 2차 검수 중...")
+                verdicts = ai_verify_blatant(ai, blatant_candidates, extra_rules=extra_rules)
+                ai_call_count += 1
+
             for result in results:
                 idx = result.get("id")
                 action = result.get("action", "OK")
                 target = result.get("target", "")
                 severity = result.get("severity", "경미")
                 # 대상이 모호하면(판단불가/없음) 차단 근거로 쓰지 않음
-                is_severe = severity == "심각" and target not in ("판단불가", "없음", "")
+                target_clear = target not in ("판단불가", "없음", "")
+                verdict, verify_reason = verdicts.get(idx, ("", ""))
+                is_blatant = severity == "명백" and verdict == "명백"
+                is_severe = severity in ("명백", "심각") and target_clear
                 reason = result.get("reason", "")
                 if target:
                     reason = f"[대상:{target}] {reason}"
                 if action == "HIDE":
-                    reason = f"[{'심각' if is_severe else '경미'}] {reason}"
+                    if is_blatant:
+                        level = "명백"
+                        reason = f"{reason} / 2차 검수: {verify_reason}"
+                    elif severity == "명백" and verdict == "아님":
+                        level = "심각(명백 기각)"
+                        reason = f"{reason} / 2차 기각: {verify_reason}"
+                    elif is_severe:
+                        level = "심각"
+                    else:
+                        level = "경미"
+                    reason = f"[{level}] {reason}"
 
                 if idx not in comment_map:
                     continue
@@ -786,22 +938,26 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                     offender = data["offenders"][author_channel_id]
                     new_count = offender["count"] + 1
                     new_severe = offender.get("severe_count", 0) + (1 if is_severe else 0)
-                    should_ban = (
+                    can_ban = (
                         AUTO_BAN
-                        and is_severe
                         and not offender.get("banned", False)
                         and author_channel_id != "unknown"
-                        and new_severe >= BAN_THRESHOLD_SEVERE
                     )
+                    ban_by_blatant = can_ban and BLATANT_INSTANT_BAN and is_blatant
+                    ban_by_severe = can_ban and is_severe and new_severe >= BAN_THRESHOLD_SEVERE
+                    should_ban = ban_by_blatant or ban_by_severe
                     tag = "📌대댓글" if is_pinned_reply else "↩대댓글" if comment.get("_is_reply") else "💬댓글"
 
                     try:
                         if should_ban:
                             reject_and_ban_author(youtube, comment_id)
+                            ban_reason = "명백 1회" if ban_by_blatant else f"심각 {new_severe}회"
                             offender["banned"] = True
                             offender["banned_at"] = datetime.now().isoformat()
+                            offender["ban_reason"] = ban_reason
+                            offender["ban_comment"] = text[:200]
                             banned_count += 1
-                            log.info(f"🚫 차단 {tag}: @{author_name} (심각 {new_severe}회 / 전체 {new_count}회) | {reason} | \"{text[:40]}...\"")
+                            log.info(f"🚫 차단 {tag}: @{author_name} ({ban_reason} / 전체 {new_count}회) | {reason} | \"{text[:40]}...\"")
                         else:
                             hide_comment(youtube, comment_id)
                             log.info(f"숨김 {tag}: @{author_name} | {reason} | \"{text[:40]}...\"")
@@ -834,7 +990,7 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
 
         repeat_offenders = {
             cid: info for cid, info in data["offenders"].items()
-            if info["count"] >= REPEAT_THRESHOLD
+            if info["count"] >= REPEAT_THRESHOLD or info.get("banned")
         }
 
         log.info(f"\n{'='*50}")

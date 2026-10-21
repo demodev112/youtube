@@ -315,7 +315,7 @@ async function loadData() {
           <div class="offender-meta">
             <span class="count-pill ${cls}">${o.count}회 숨김</span>
             ${o.severe_count ? '<span class="count-pill high">심각 ' + o.severe_count + '회</span>' : ''}
-            ${o.banned ? '<span class="count-pill high">🚫 차단됨</span>' : ''}
+            ${o.banned ? '<span class="count-pill high">🚫 차단됨' + (o.ban_reason ? ' · ' + escHtml(o.ban_reason) : '') + '</span>' : ''}
             <a href="${o.channel_url}" target="_blank" class="ban-btn">채널 방문 →</a>
           </div>
         </div>
@@ -355,7 +355,7 @@ def api_data():
 
     repeat_offenders = [
         info for info in data["offenders"].values()
-        if info["count"] >= REPEAT_THRESHOLD
+        if info["count"] >= REPEAT_THRESHOLD or info.get("banned")
     ]
     repeat_offenders.sort(key=lambda x: -x["count"])
 

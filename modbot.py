@@ -34,7 +34,8 @@ PARENT_TEXT_MAX_CHARS = 300  # AI에 넘길 원댓글 길이
 PREV_REPLY_MAX_CHARS = 200   # 전용 규칙 영상에서 AI에 넘길 앞선 답글 1개당 길이
 PREV_REPLY_COUNT = 3         # 전용 규칙 영상에서 AI에 넘길 앞선 답글 개수
 
-AI_MODEL = "claude-sonnet-5-5"  # Opus 5.5 대비 입력·출력 모두 절반 가격
+# 기본 모델. 워크플로우 수동 실행 시 model 입력(환경변수 MODBOT_MODEL)으로 1회성 변경 가능
+AI_MODEL = os.environ.get("MODBOT_MODEL", "").strip() or "claude-sonnet-5-5"
 AI_EFFORT = "high"  # low / medium / high — 판단 깊이 (높을수록 느리고 비쌈)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -586,6 +587,7 @@ def get_my_channel_id(youtube):
 
 def run_moderation(max_comments: int = 200, video_input: str = None):
     log.info("=" * 50)
+    log.info(f"AI 모델: {AI_MODEL} (effort={AI_EFFORT})")
 
     youtube = get_authenticated_service()
     ai = get_anthropic_client()

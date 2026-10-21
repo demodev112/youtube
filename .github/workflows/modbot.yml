@@ -12,6 +12,10 @@ on:
         description: '최대 스캔 댓글 수'
         required: false
         default: '40'
+      model:
+        description: '이번 실행만 쓸 AI 모델 (비워두면 코드 기본값 Sonnet). 예: claude-opus-5-5'
+        required: false
+        default: ''
 
   # ② 자동 실행 (매일 오전 9시, 오후 3시, 오후 9시 KST)
   schedule:
@@ -43,6 +47,7 @@ jobs:
       - name: 악플 봇 실행
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODBOT_MODEL: ${{ github.event.inputs.model }}
         run: |
           if [ -n "${{ github.event.inputs.video_url }}" ]; then
             py_cmd="python modbot.py --max ${{ github.event.inputs.max_comments }} --video ${{ github.event.inputs.video_url }}"

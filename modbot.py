@@ -192,7 +192,11 @@ target 값은 "운영자" / "부분가동범위파" / "둘다" / "판단불가" 
 # - 운영자가 직접 복구한 댓글. AI가 HIDE 로 판단해도 건너뜀
 # - unhide.py 실행 로그에 찍히는 ID 를 여기에 추가
 # ──────────────────────────────────────────────────────────────────────────────
-NEVER_HIDE_IDS = set()
+NEVER_HIDE_IDS = {
+    "UgzU2xPOQtOULaYjhBV4AaABAg",  # @jxwooo "약사세요?"
+    "UgxmA9iarfRkroGoXDR4AaABAg",  # @siwon04-monkey "형님 처음에 나오는 남자 엉덩이 보고 악플 달 뻔했습니다"
+    "UgxiddRU7cPR4_9O0AN4AaABAg",  # @안되면될때까지-z7g "뭐야 이분 직업이 약사였어? 😅"
+}
 
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)
 RESULT_SCHEMA = {

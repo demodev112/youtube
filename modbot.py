@@ -32,13 +32,17 @@ REPEAT_THRESHOLD = 3   # 이 횟수 이상 숨겨진 사람을 "반복 악플러
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ★ 자동 차단 (채널에서 사용자 숨기기) ★
-# - 누적 숨김 횟수가 BAN_THRESHOLD 에 도달하면 그 댓글을 "거부" 처리하면서
+# - AI가 숨긴 댓글마다 심각도(심각/경미)를 매김
+#   · 심각: 운영자의 전문성·자격·몸·능력 공격, AI 관련 지적 전부, 욕설·인신공격·조롱
+#   · 경미: 영상/제품 불만, 편집 지적, 이전 영상 질문, 단순 궁금증 등
+# - "심각" 누적 횟수가 BAN_THRESHOLD_SEVERE 에 도달하면 그 댓글을 "거부" 처리하면서
 #   작성자를 채널에서 숨김 (YouTube API banAuthor). 이후 그 사람의 댓글은 YouTube가 자동으로 거름
+# - "경미"는 숨기기만 하고 차단 카운트에 넣지 않음 (몇 번이어도 차단 안 됨)
 # - 스튜디오 → 설정 → 커뮤니티 → "채널에서 숨겨진 사용자" 에서 언제든 해제 가능
 # - 끄려면 AUTO_BAN = False
 # ──────────────────────────────────────────────────────────────────────────────
 AUTO_BAN = True
-BAN_THRESHOLD = 3
+BAN_THRESHOLD_SEVERE = 2
 
 AI_BATCH_SIZE = 20
 PARENT_TEXT_MAX_CHARS = 300  # AI에 넘길 원댓글 길이
@@ -221,9 +225,10 @@ RESULT_SCHEMA = {
                     "id": {"type": "integer"},
                     "target": {"type": "string"},
                     "action": {"type": "string", "enum": ["HIDE", "OK"]},
+                    "severity": {"type": "string", "enum": ["심각", "경미", "없음"]},
                     "reason": {"type": "string"},
                 },
-                "required": ["id", "target", "action", "reason"],
+                "required": ["id", "target", "action", "severity", "reason"],
                 "additionalProperties": False,
             },
         }
@@ -260,6 +265,8 @@ MODERATION_PROMPT = """
   "소라", "미드저니", "veo", "sora", "ai 티 난다", "ai 냄새"
 - 농담, 질문, 의심, 반어, 칭찬처럼 보이는 말투("ai인 줄", "ai급 몸")도 전부 HIDE
 - 주어가 없어도, 짧아도("ai", "AI?", "ㅇㅇ ai") HIDE
+- 운영자가 AI를 "사용했다"는 지적도 전부 포함: "gpt로 대본 썼네", "ai로 주제 뽑네", "챗gpt 돌린 티 남",
+  "ai가 써준 거 읽는 듯", "ai 목소리", "ai 더빙", "ai 편집" → HIDE
 - 예외는 딱 하나: 운영자/영상과 전혀 무관하게 AI를 도구로 언급하는 경우만 OK
   예: "운동 앱에 AI 기능 있나요?", "챗GPT한테 물어봤더니"
   → 조금이라도 애매하면 HIDE
@@ -322,7 +329,30 @@ MODERATION_PROMPT = """
 4. 이전 영상이 왜 없어졌냐/지웠냐/비공개냐는 댓글 → HIDE
 5. 트레이너들/헬창들/유튜버들 같은 집단 일반론, 이름 명시된 제3자, 원댓글 작성자, 본인, 단순 비속어 → OK
 
-각 댓글마다 target(운영자/영상/제품/집단일반론/제3자/다른댓글러/본인/없음), action(HIDE/OK), reason(한 줄)을 응답하세요.
+[심각도(severity) 판단 — HIDE 인 댓글마다 반드시 매길 것]
+심각도는 "이 사람을 채널에서 차단할 근거가 되는 댓글인가"의 기준입니다. 심각은 2회면 차단, 경미는 몇 번이어도 차단하지 않습니다.
+
+▶ "심각" — 아래 중 하나라도 해당하면 심각
+- AI 관련 지적 전부: 운영자/몸/영상이 AI다, AI 같다, AI로 만들었다, AI를 사용했다 (농담·질문이어도 심각)
+- 운영자의 전문성·자격·능력을 부정하거나 깎아내림: "약사가 뭘 알아", "자격도 없으면서", "무슨 근거로", "가르칠 자격 있냐",
+  "직접 해보긴 했냐", "증명해봐", "책임질 수 있냐"
+- 운영자의 몸·외모·목소리·발음·외형을 비하: "몸 구림", "어좁", "빡머리", "혀 짧", "목소리 거슬림", "애기같은 거"
+- 욕설·인신공격·조롱·비꼼이 운영자 본인을 향함: "등신", "개소리", "꺼드럭", "ㅇㅈㄹ", "꼰대", "어그로"
+- 운영자 주장이 틀렸다/거짓말이다/위험하다고 단정하며 깎아내림 (근거 제시 없이 조롱조)
+- 약물·거짓·사기 등 운영자의 도덕성·진실성을 공격
+
+▶ "경미" — 숨기지만 차단 근거는 아님
+- 영상에 대한 불만·아쉬움: 길다, 편집 실수, 자막 가시성, 주제 빠짐, 반복된다, 업로드 주기
+- 제품에 대한 불만·피드백: 비싸다, 리뉴얼 필요, 오류, 다른 앱이 낫다 (조롱이 아닌 경우)
+- 이전 영상이 없어졌냐는 질문
+- 단순 궁금증으로 자격·직업을 묻는 것: "약사세요?", "이분 직업이 약사였어?" (부정·조롱 없이 묻기만 하면 경미)
+- 정중하거나 근거를 들어 영상 내용에 반론하는 것 (조롱·비하 없음)
+- 농담조·가벼운 반응으로 대상이 애매한 것: "악플 달 뻔했습니다", "하......"
+- 그 외 대상이 운영자인지 확실하지 않은 모든 경우
+
+▶ action 이 OK 이면 severity 는 "없음"
+
+각 댓글마다 target(운영자/영상/제품/집단일반론/제3자/다른댓글러/본인/없음), action(HIDE/OK), severity(심각/경미/없음), reason(한 줄)을 응답하세요.
 """
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -709,9 +739,13 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                 idx = result.get("id")
                 action = result.get("action", "OK")
                 target = result.get("target", "")
+                severity = result.get("severity", "경미")
+                is_severe = severity == "심각"
                 reason = result.get("reason", "")
                 if target:
                     reason = f"[대상:{target}] {reason}"
+                if action == "HIDE":
+                    reason = f"[{'심각' if is_severe else '경미'}] {reason}"
 
                 if idx not in comment_map:
                     continue
@@ -739,17 +773,20 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                             "last_comment": "",
                             "last_reason": "",
                             "timestamps": [],
+                            "severe_count": 0,
                             "banned": False,
                             "banned_at": None,
                             "channel_url": f"https://www.youtube.com/channel/{author_channel_id}"
                         }
                     offender = data["offenders"][author_channel_id]
                     new_count = offender["count"] + 1
+                    new_severe = offender.get("severe_count", 0) + (1 if is_severe else 0)
                     should_ban = (
                         AUTO_BAN
+                        and is_severe
                         and not offender.get("banned", False)
                         and author_channel_id != "unknown"
-                        and new_count >= BAN_THRESHOLD
+                        and new_severe >= BAN_THRESHOLD_SEVERE
                     )
                     tag = "📌대댓글" if is_pinned_reply else "↩대댓글" if comment.get("_is_reply") else "💬댓글"
 
@@ -759,13 +796,14 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                             offender["banned"] = True
                             offender["banned_at"] = datetime.now().isoformat()
                             banned_count += 1
-                            log.info(f"🚫 차단 {tag}: @{author_name} (누적 {new_count}회) | {reason} | \"{text[:40]}...\"")
+                            log.info(f"🚫 차단 {tag}: @{author_name} (심각 {new_severe}회 / 전체 {new_count}회) | {reason} | \"{text[:40]}...\"")
                         else:
                             hide_comment(youtube, comment_id)
                             log.info(f"숨김 {tag}: @{author_name} | {reason} | \"{text[:40]}...\"")
                         hidden_count += 1
 
                         offender["count"] = new_count
+                        offender["severe_count"] = new_severe
                         offender["name"] = author_name
                         offender["last_comment"] = text[:100]
                         offender["last_reason"] = reason
@@ -802,7 +840,7 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
             log.info(f"\n⚠️  반복 악플러 {len(repeat_offenders)}명:")
             for cid, info in sorted(repeat_offenders.items(), key=lambda x: -x[1]["count"]):
                 flag = " [차단됨]" if info.get("banned") else ""
-                log.info(f"  → {info['name']} ({info['count']}회){flag} | {info['channel_url']}")
+                log.info(f"  → {info['name']} (전체 {info['count']}회, 심각 {info.get('severe_count', 0)}회){flag} | {info['channel_url']}")
         else:
             log.info("반복 악플러 없음")
 

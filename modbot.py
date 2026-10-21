@@ -34,7 +34,7 @@ PARENT_TEXT_MAX_CHARS = 300  # AI에 넘길 원댓글 길이
 PREV_REPLY_MAX_CHARS = 200   # 전용 규칙 영상에서 AI에 넘길 앞선 답글 1개당 길이
 PREV_REPLY_COUNT = 3         # 전용 규칙 영상에서 AI에 넘길 앞선 답글 개수
 
-AI_MODEL = "claude-opus-5-5"
+AI_MODEL = "claude-sonnet-5-5"  # Opus 5.5 대비 입력·출력 모두 절반 가격
 AI_EFFORT = "high"  # low / medium / high — 판단 깊이 (높을수록 느리고 비쌈)
 
 # ──────────────────────────────────────────────────────────────────────────────

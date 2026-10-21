@@ -16,6 +16,10 @@ on:
         description: '이번 실행만 쓸 AI 모델 (비워두면 코드 기본값 Sonnet). 예: claude-opus-5-5'
         required: false
         default: ''
+      rejudge:
+        description: 'true 면 이미 처리한 댓글도 전부 다시 판단 (기준 바꾼 뒤 전체 재검토용)'
+        required: false
+        default: 'false'
 
   # ② 자동 실행 (매일 오전 9시, 오후 3시, 오후 9시 KST)
   schedule:
@@ -44,10 +48,20 @@ jobs:
         run: |
           echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
 
+      # 이전 실행의 offender_data.json 을 가져옴 (처리 완료 목록 + 악플러 누적 횟수 + 차단 여부)
+      - name: 이전 실행 데이터 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: offender_data.json
+          key: modbot-data-${{ github.run_id }}
+          restore-keys: |
+            modbot-data-
+
       - name: 악플 봇 실행
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MODBOT_MODEL: ${{ github.event.inputs.model }}
+          MODBOT_REJUDGE: ${{ github.event.inputs.rejudge }}
         run: |
           if [ -n "${{ github.event.inputs.video_url }}" ]; then
             py_cmd="python modbot.py --max ${{ github.event.inputs.max_comments }} --video ${{ github.event.inputs.video_url }}"
@@ -56,6 +70,15 @@ jobs:
           fi
           echo "실행: $py_cmd"
           $py_cmd
+
+      # 다음 실행이 이어받도록 저장 (봇이 실패해도 저장 시도)
+      - name: 실행 데이터 저장
+        if: always()
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: offender_data.json
+          key: modbot-data-${{ github.run_id }}
 
       - name: 결과 저장 (offender_data.json 업로드)
         uses: actions/upload-artifact@v4

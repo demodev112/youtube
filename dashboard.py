@@ -314,6 +314,7 @@ async function loadData() {
           </div>
           <div class="offender-meta">
             <span class="count-pill ${cls}">${o.count}회 숨김</span>
+            ${o.banned ? '<span class="count-pill high">🚫 차단됨</span>' : ''}
             <a href="${o.channel_url}" target="_blank" class="ban-btn">채널 방문 →</a>
           </div>
         </div>

@@ -28,7 +28,18 @@ CREDENTIALS_FILE = "client_secrets.json"
 DATA_FILE = "offender_data.json"
 LOG_FILE = "modbot.log"
 
-REPEAT_THRESHOLD = 3
+REPEAT_THRESHOLD = 3   # 이 횟수 이상 숨겨진 사람을 "반복 악플러"로 표시
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ★ 자동 차단 (채널에서 사용자 숨기기) ★
+# - 누적 숨김 횟수가 BAN_THRESHOLD 에 도달하면 그 댓글을 "거부" 처리하면서
+#   작성자를 채널에서 숨김 (YouTube API banAuthor). 이후 그 사람의 댓글은 YouTube가 자동으로 거름
+# - 스튜디오 → 설정 → 커뮤니티 → "채널에서 숨겨진 사용자" 에서 언제든 해제 가능
+# - 끄려면 AUTO_BAN = False
+# ──────────────────────────────────────────────────────────────────────────────
+AUTO_BAN = True
+BAN_THRESHOLD = 3
+
 AI_BATCH_SIZE = 20
 PARENT_TEXT_MAX_CHARS = 300  # AI에 넘길 원댓글 길이
 PREV_REPLY_MAX_CHARS = 200   # 전용 규칙 영상에서 AI에 넘길 앞선 답글 1개당 길이
@@ -431,6 +442,14 @@ def hide_comment(youtube, comment_id: str):
         moderationStatus="heldForReview"
     ).execute()
 
+def reject_and_ban_author(youtube, comment_id: str):
+    """댓글을 거부 처리하면서 작성자를 채널에서 숨김 (banAuthor 는 rejected 에서만 유효)."""
+    youtube.comments().setModerationStatus(
+        id=comment_id,
+        moderationStatus="rejected",
+        banAuthor=True
+    ).execute()
+
 def get_replies(youtube, thread_id: str, is_pinned: bool = False) -> list[dict]:
     """대댓글 가져오기. 고정 댓글이면 is_pinned=True 표시."""
     replies = []
@@ -605,6 +624,7 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
     data = load_data()
 
     hidden_count = 0
+    banned_count = 0
     scanned_count = 0
     ai_call_count = 0
 
@@ -628,12 +648,15 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
         video_info = get_video_info(youtube, [c.get("_video_id", "") for c in all_comments])
         log.info(f"영상 정보 {len(video_info)}개 조회됨")
 
-        # 이미 처리한 댓글 제외
-        new_comments = [
-            c for c in all_comments
-            if c["id"] not in data["processed"]
-        ]
-        log.info(f"새 댓글 {len(new_comments)}개 판단 필요")
+        # 이미 처리한 댓글 제외 (MODBOT_REJUDGE=true 면 전부 다시 판단)
+        rejudge = os.environ.get("MODBOT_REJUDGE", "").strip().lower() == "true"
+        if rejudge:
+            log.info("MODBOT_REJUDGE=true: 처리 완료 목록을 무시하고 전부 다시 판단")
+            new_comments = list(all_comments)
+        else:
+            processed_set = set(data["processed"])
+            new_comments = [c for c in all_comments if c["id"] not in processed_set]
+        log.info(f"새 댓글 {len(new_comments)}개 판단 필요 (이미 처리 {len(all_comments) - len(new_comments)}개 건너뜀)")
 
         # 영상별 전용 규칙이 있는 댓글은 따로 묶어서 그 규칙으로 판단 (기본 그룹 키: "")
         groups: dict[str, list[dict]] = {}
@@ -708,39 +731,55 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                     continue
 
                 if action == "HIDE":
+                    if author_channel_id not in data["offenders"]:
+                        data["offenders"][author_channel_id] = {
+                            "name": author_name,
+                            "channel_id": author_channel_id,
+                            "count": 0,
+                            "last_comment": "",
+                            "last_reason": "",
+                            "timestamps": [],
+                            "banned": False,
+                            "banned_at": None,
+                            "channel_url": f"https://www.youtube.com/channel/{author_channel_id}"
+                        }
+                    offender = data["offenders"][author_channel_id]
+                    new_count = offender["count"] + 1
+                    should_ban = (
+                        AUTO_BAN
+                        and not offender.get("banned", False)
+                        and author_channel_id != "unknown"
+                        and new_count >= BAN_THRESHOLD
+                    )
+                    tag = "📌대댓글" if is_pinned_reply else "↩대댓글" if comment.get("_is_reply") else "💬댓글"
+
                     try:
-                        hide_comment(youtube, comment_id)
+                        if should_ban:
+                            reject_and_ban_author(youtube, comment_id)
+                            offender["banned"] = True
+                            offender["banned_at"] = datetime.now().isoformat()
+                            banned_count += 1
+                            log.info(f"🚫 차단 {tag}: @{author_name} (누적 {new_count}회) | {reason} | \"{text[:40]}...\"")
+                        else:
+                            hide_comment(youtube, comment_id)
+                            log.info(f"숨김 {tag}: @{author_name} | {reason} | \"{text[:40]}...\"")
                         hidden_count += 1
 
-                        if author_channel_id not in data["offenders"]:
-                            data["offenders"][author_channel_id] = {
-                                "name": author_name,
-                                "channel_id": author_channel_id,
-                                "count": 0,
-                                "last_comment": "",
-                                "last_reason": "",
-                                "timestamps": [],
-                                "channel_url": f"https://www.youtube.com/channel/{author_channel_id}"
-                            }
-
-                        offender = data["offenders"][author_channel_id]
-                        offender["count"] += 1
+                        offender["count"] = new_count
                         offender["name"] = author_name
                         offender["last_comment"] = text[:100]
                         offender["last_reason"] = reason
                         offender["timestamps"].append(datetime.now().isoformat())
-
-                        tag = "📌대댓글" if is_pinned_reply else "↩대댓글" if comment.get("_is_reply") else "💬댓글"
-                        log.info(f"숨김 {tag}: @{author_name} | {reason} | \"{text[:40]}...\"")
                         time.sleep(0.3)
 
                     except HttpError as e:
-                        log.error(f"숨김 실패 ({comment_id}): {e}")
+                        log.error(f"숨김/차단 실패 ({comment_id}): {e}")
 
             if batch_no + 1 < len(batches):
                 time.sleep(1)
 
         data["stats"]["total_hidden"] += hidden_count
+        data["stats"]["total_banned"] = data["stats"].get("total_banned", 0) + banned_count
         data["stats"]["total_scanned"] += scanned_count
         data["stats"]["ai_calls"] = data["stats"].get("ai_calls", 0) + ai_call_count
         data["stats"]["last_run"] = datetime.now().isoformat()
@@ -756,13 +795,14 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
         }
 
         log.info(f"\n{'='*50}")
-        log.info(f"결과: {scanned_count}개 스캔 → {hidden_count}개 숨김 (AI 호출 {ai_call_count}회)")
-        log.info(f"누적: 총 {data['stats']['total_hidden']}개 숨김, AI {data['stats']['ai_calls']}회 호출")
+        log.info(f"결과: {scanned_count}개 스캔 → {hidden_count}개 숨김 (이 중 차단 {banned_count}명, AI 호출 {ai_call_count}회)")
+        log.info(f"누적: 총 {data['stats']['total_hidden']}개 숨김, 차단 {data['stats'].get('total_banned', 0)}명, AI {data['stats']['ai_calls']}회 호출")
 
         if repeat_offenders:
             log.info(f"\n⚠️  반복 악플러 {len(repeat_offenders)}명:")
             for cid, info in sorted(repeat_offenders.items(), key=lambda x: -x[1]["count"]):
-                log.info(f"  → {info['name']} ({info['count']}회) | {info['channel_url']}")
+                flag = " [차단됨]" if info.get("banned") else ""
+                log.info(f"  → {info['name']} ({info['count']}회){flag} | {info['channel_url']}")
         else:
             log.info("반복 악플러 없음")
 
@@ -773,6 +813,7 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
     return {
         "scanned": scanned_count,
         "hidden": hidden_count,
+        "banned": banned_count,
         "ai_calls": ai_call_count,
         "repeat_offenders": repeat_offenders if "repeat_offenders" in locals() else {}
     }

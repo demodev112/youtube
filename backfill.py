@@ -82,7 +82,8 @@ def list_held_threads(youtube, channel_id: str, max_threads: int) -> list[dict]:
     threads, token = [], None
     while True:
         params = {
-            "part": "snippet",
+            # replies 를 같이 받으면 숨겨진 대댓글이 스레드에 딸려 옴 (comments.list 로는 안 나옴)
+            "part": "snippet,replies",
             "allThreadsRelatedToChannelId": channel_id,
             "maxResults": 100,
             "moderationStatus": "heldForReview",
@@ -177,48 +178,57 @@ def judge_all(ai, comments: list[dict], titles: dict) -> tuple[dict, int, int]:
 
 def main():
     parser = argparse.ArgumentParser(description="과거 숨김 댓글 재판정·차단 (1회성)")
-    parser.add_argument("--source", required=True, help="원본 실행의 offender_data.json 경로")
+    parser.add_argument("--source", default="", help="원본 실행의 offender_data.json 경로 (그 실행에서 판정한 댓글만 대상)")
+    parser.add_argument("--all-held", action="store_true", help="원본 실행과 상관없이 지금 숨김 상태인 댓글 전부 재판정")
+    parser.add_argument("--skip-authors", default="", help="차단하지 않고 숨김만 유지할 작성자 표시 이름. | 로 구분")
     parser.add_argument("--apply", action="store_true", help="실제로 차단 (없으면 미리보기)")
     parser.add_argument("--max-held", type=int, default=1000, help="훑을 검토 대기 스레드 최대 수")
     args = parser.parse_args()
+    if not args.source and not args.all_held:
+        raise SystemExit("--source 또는 --all-held 중 하나는 필요합니다")
+    skip_authors = {s.strip() for s in args.skip_authors.split("|") if s.strip()}
 
     mode = "실제 차단" if args.apply else "미리보기 (아무것도 바꾸지 않음)"
+    scope = "지금 숨김 상태인 댓글 전부" if args.all_held else "원본 실행에서 판정했던 댓글"
     out("=" * 60)
-    out(f"과거 숨김 댓글 재판정 — {mode}")
+    out(f"과거 숨김 댓글 재판정 — {mode} / 범위: {scope}")
     out(f"AI 모델: {AI_MODEL}")
+    if skip_authors:
+        out(f"차단 제외(숨김만 유지) 작성자 {len(skip_authors)}명")
 
-    with open(args.source, encoding="utf-8") as f:
-        src = json.load(f)
-    source_ids = list(dict.fromkeys(src.get("processed", [])))
-    src_set = set(source_ids)
-    out(f"원본 실행에서 판정했던 댓글: {len(source_ids)}개")
+    src_set: set[str] = set()
+    if args.source:
+        with open(args.source, encoding="utf-8") as f:
+            src = json.load(f)
+        src_set = set(src.get("processed", []))
+        out(f"원본 실행에서 판정했던 댓글: {len(src_set)}개")
 
     youtube = get_authenticated_service()
     ai = get_anthropic_client()
     my_channel = get_my_channel_id(youtube)
 
-    # 1) ID 로 직접 조회해서 현재 상태 확인 (대댓글 포함)
-    by_id = fetch_by_ids(youtube, source_ids)
-    status_counts = Counter(it["snippet"].get("moderationStatus", "(표시 없음)") for it in by_id.values())
-    out(f"ID 조회로 찾은 댓글: {len(by_id)}개 / 상태 분포: {dict(status_counts)}")
-    held = {cid: it for cid, it in by_id.items() if it["snippet"].get("moderationStatus") == "heldForReview"}
-
-    # 2) 보강: 검토 대기 스레드 목록에서 원본 실행 ID 와 겹치는 최상위 댓글
-    #    주의: 이 목록에는 "대댓글만 숨겨진 스레드"도 섞여 나옴 (최상위 댓글 자체는 공개 상태).
-    #    공개 댓글은 1)의 ID 조회에서 이미 돌아오고, 숨겨진 댓글은 돌아오지 않으므로
-    #    ID 조회에서 돌아온 댓글은 숨김 상태가 아님 → 제외
-    added, reply_only = 0, 0
-    for t in list_held_threads(youtube, my_channel, args.max_held):
+    # 1) 검토 대기 스레드 목록: 최상위 댓글 + 스레드에 딸려 온 대댓글
+    threads = list_held_threads(youtube, my_channel, args.max_held)
+    found: dict[str, dict] = {}
+    for t in threads:
+        vid = t["snippet"].get("videoId", "")
         top = t["snippet"]["topLevelComment"]
-        if top["id"] not in src_set or top["id"] in held:
-            continue
-        if top["id"] in by_id:
-            reply_only += 1
-            continue
-        top["snippet"].setdefault("videoId", t["snippet"].get("videoId", ""))
-        held[top["id"]] = top
-        added += 1
-    out(f"검토 대기 목록에서 찾은 숨김 최상위 댓글: {added}개 (대댓글만 숨겨진 공개 댓글 {reply_only}개 제외)")
+        top["snippet"].setdefault("videoId", vid)
+        found[top["id"]] = top
+        for r in t.get("replies", {}).get("comments", []):
+            r["snippet"].setdefault("videoId", vid)
+            found[r["id"]] = r
+    n_reply = sum(1 for it in found.values() if it["snippet"].get("parentId"))
+    out(f"검토 대기 스레드 {len(threads)}개 / 최상위 {len(found) - n_reply}개, 딸려 온 대댓글 {n_reply}개")
+
+    # 2) 이 목록에는 "대댓글만 숨겨진 스레드의 공개 최상위 댓글", "숨김 스레드의 공개 대댓글"도 섞여 나옴.
+    #    공개 댓글은 ID 조회에 돌아오고 숨겨진 댓글은 돌아오지 않으므로, 돌아온 것은 제외
+    visible = fetch_by_ids(youtube, list(found))
+    held = {cid: it for cid, it in found.items() if cid not in visible}
+    out(f"그중 공개 상태 {len(found) - len(held)}개 제외 → 숨김 상태 {len(held)}개")
+    if not args.all_held:
+        held = {cid: it for cid, it in held.items() if cid in src_set}
+        out(f"원본 실행에서 판정했던 댓글로 좁힘 → {len(held)}개")
 
     # 제외: 예외 목록, 운영자 본인 댓글
     excluded = 0
@@ -227,8 +237,7 @@ def main():
         if cid in NEVER_HIDE_IDS or author == my_channel:
             del held[cid]
             excluded += 1
-    out(f"현재 검토 대기 중인 원본 실행 댓글: {len(held)}개 (예외·본인 {excluded}개 제외)")
-    out(f"조회되지 않은 댓글: {len(src_set) - len(by_id)}개 (삭제됐거나 API가 돌려주지 않는 댓글)")
+    out(f"재판정 대상: {len(held)}개 (예외·본인 {excluded}개 제외)")
 
     if not held:
         out("재판정할 댓글이 없습니다.")
@@ -237,7 +246,10 @@ def main():
 
     # 대댓글의 원댓글 본문
     parent_ids = sorted({it["snippet"].get("parentId") for it in held.values() if it["snippet"].get("parentId")})
-    parents = fetch_by_ids(youtube, parent_ids) if parent_ids else {}
+    parents = {pid: found[pid] for pid in parent_ids if pid in found}
+    missing = [pid for pid in parent_ids if pid not in parents]
+    if missing:
+        parents.update(fetch_by_ids(youtube, missing))
 
     comments = []
     for cid, it in held.items():
@@ -273,7 +285,10 @@ def main():
         prev_severe = prev.get("severe_count", 0)
         total_severe = prev_severe + len(severe)
         ban_comment, ban_reason = None, None
-        if AUTO_BAN and acid != "unknown" and not prev.get("banned", False):
+        skipped = items[0]["author_name"] in skip_authors
+        if skipped:
+            pass
+        elif AUTO_BAN and acid != "unknown" and not prev.get("banned", False):
             if blatant and BLATANT_INSTANT_BAN:
                 ban_comment, ban_reason = blatant[0], "명백 1회"
             elif severe and total_severe >= BAN_THRESHOLD_SEVERE:
@@ -286,6 +301,7 @@ def main():
             "prev_severe": prev_severe,
             "total_severe": total_severe,
             "already_banned": prev.get("banned", False),
+            "skipped": skipped,
             "ban_comment": ban_comment,
             "ban_reason": ban_reason,
         })
@@ -303,7 +319,20 @@ def main():
             out(f"     {mark} [{j['level']}] \"{j['text'][:80]}\"")
             out(f"         사유: {j['reason']}" + (f" / 2차: {j['verify']}" if j["verify"] else ""))
 
-    watch = [p for p in plan if not p["ban_comment"] and p["severe"] and not p["already_banned"]]
+    skipped_plan = [p for p in plan if p["skipped"]]
+    if skipped_plan:
+        out("")
+        out(f"■ 운영자 지정으로 차단 제외 (숨김만 유지): {len(skipped_plan)}명")
+        for p in skipped_plan:
+            for j in p["items"]:
+                out(f"     {p['name']} [{j['level']}] \"{j['text'][:80]}\"")
+
+    already = [p for p in plan if p["already_banned"]]
+    if already:
+        out("")
+        out(f"■ 이미 차단된 사람: {len(already)}명 ({', '.join(p['name'] for p in already)})")
+
+    watch = [p for p in plan if not p["ban_comment"] and p["severe"] and not p["already_banned"] and not p["skipped"]]
     out("")
     out(f"■ 심각 1회라 아직 차단 아님 (다음에 심각 1회 더면 차단): {len(watch)}명")
     for p in watch:
@@ -334,6 +363,8 @@ def main():
     banned = 0
     now = datetime.now().isoformat()
     for p in plan:
+        if p["skipped"]:
+            continue  # 운영자가 "숨김만" 지정한 사람은 누적 횟수에도 넣지 않음
         offender = data["offenders"].setdefault(p["acid"], {
             "name": p["name"],
             "channel_id": p["acid"],

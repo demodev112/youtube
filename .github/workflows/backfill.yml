@@ -4,9 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: '숨김을 처리했던 워크플로우 실행 ID (기본: 10/21 400개 일괄 검토)'
-        required: true
+        description: '숨김을 처리했던 워크플로우 실행 ID (all_held 가 true 면 무시)'
+        required: false
         default: '39545596066'
+      all_held:
+        description: 'true 면 실행 ID 와 상관없이 지금 숨김 상태인 댓글 전부 재판정'
+        required: false
+        default: 'false'
+      skip_authors:
+        description: '차단하지 않고 숨김만 유지할 작성자 표시 이름. | 로 구분 (예: @abc|@def)'
+        required: false
+        default: ''
       model:
         description: '재판정에 쓸 AI 모델'
         required: false
@@ -41,6 +49,7 @@ jobs:
           echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
 
       - name: 원본 실행 결과 내려받기
+        if: github.event.inputs.all_held != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: modbot-results-*
@@ -63,10 +72,13 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MODBOT_MODEL: ${{ github.event.inputs.model }}
           APPLY: ${{ github.event.inputs.apply }}
+          ALL_HELD: ${{ github.event.inputs.all_held }}
+          SKIP_AUTHORS: ${{ github.event.inputs.skip_authors }}
         run: |
-          extra=""
-          if [ "$APPLY" = "true" ]; then extra="--apply"; fi
-          python backfill.py --source backfill_src/offender_data.json $extra
+          args=()
+          if [ "$ALL_HELD" = "true" ]; then args+=(--all-held); else args+=(--source backfill_src/offender_data.json); fi
+          if [ "$APPLY" = "true" ]; then args+=(--apply); fi
+          python backfill.py "${args[@]}" --skip-authors "$SKIP_AUTHORS"
 
       # 실제 차단한 경우에만 누적 데이터 저장 (다음 자동 실행이 이어받음)
       - name: 누적 데이터 저장

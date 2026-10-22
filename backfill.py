@@ -203,15 +203,22 @@ def main():
     out(f"ID 조회로 찾은 댓글: {len(by_id)}개 / 상태 분포: {dict(status_counts)}")
     held = {cid: it for cid, it in by_id.items() if it["snippet"].get("moderationStatus") == "heldForReview"}
 
-    # 2) 보강: 검토 대기 최상위 댓글 목록에서 원본 실행 ID 와 겹치는 것
-    added = 0
+    # 2) 보강: 검토 대기 스레드 목록에서 원본 실행 ID 와 겹치는 최상위 댓글
+    #    주의: 이 목록에는 "대댓글만 숨겨진 스레드"도 섞여 나옴 (최상위 댓글 자체는 공개 상태).
+    #    공개 댓글은 1)의 ID 조회에서 이미 돌아오고, 숨겨진 댓글은 돌아오지 않으므로
+    #    ID 조회에서 돌아온 댓글은 숨김 상태가 아님 → 제외
+    added, reply_only = 0, 0
     for t in list_held_threads(youtube, my_channel, args.max_held):
         top = t["snippet"]["topLevelComment"]
-        if top["id"] in src_set and top["id"] not in held:
-            top["snippet"].setdefault("videoId", t["snippet"].get("videoId", ""))
-            held[top["id"]] = top
-            added += 1
-    out(f"검토 대기 목록에서 추가로 찾은 최상위 댓글: {added}개")
+        if top["id"] not in src_set or top["id"] in held:
+            continue
+        if top["id"] in by_id:
+            reply_only += 1
+            continue
+        top["snippet"].setdefault("videoId", t["snippet"].get("videoId", ""))
+        held[top["id"]] = top
+        added += 1
+    out(f"검토 대기 목록에서 찾은 숨김 최상위 댓글: {added}개 (대댓글만 숨겨진 공개 댓글 {reply_only}개 제외)")
 
     # 제외: 예외 목록, 운영자 본인 댓글
     excluded = 0

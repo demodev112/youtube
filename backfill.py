@@ -12,7 +12,7 @@
 
 차단 규칙은 modbot.py 와 동일:
   - "명백" 이 2차 검수에서 확정되면 1회로 차단
-  - "심각"(명백 기각 포함) 누적이 BAN_THRESHOLD_SEVERE 회 이상이면 차단 (기존 누적 횟수 포함)
+  - "심각"(AI 지적만, 명백 기각 포함) 누적이 BAN_THRESHOLD_SEVERE 회 이상이면 차단 (기존 누적 횟수 포함)
   - "경미" 는 차단 근거가 아님
 """
 
@@ -33,6 +33,7 @@ from modbot import (
     VIDEO_SPECIFIC_RULES,
     ai_judge_batch,
     ai_verify_blatant,
+    classify_level,
     get_anthropic_client,
     get_authenticated_service,
     get_my_channel_id,
@@ -154,23 +155,11 @@ def judge_all(ai, comments: list[dict], titles: dict) -> tuple[dict, int, int]:
                 c = idmap.get(r.get("id"))
                 if not c:
                     continue
-                action = r.get("action", "OK")
-                target = r.get("target", "")
-                sev = r.get("severity", "경미")
                 verdict, vreason = verdicts.get(r["id"], ("", ""))
-                target_clear = target not in ("판단불가", "없음", "")
-                if action != "HIDE":
-                    level = "OK"
-                elif sev == "명백" and verdict == "명백":
-                    level = "명백"
-                elif sev in ("명백", "심각") and target_clear:
-                    level = "심각(명백 기각)" if sev == "명백" and verdict == "아님" else "심각"
-                else:
-                    level = "경미"
                 judged[c["cid"]] = {
                     **c,
-                    "level": level,
-                    "target": target,
+                    "level": classify_level(r, verdict),
+                    "target": r.get("target", ""),
                     "reason": r.get("reason", ""),
                     "verify": vreason,
                 }

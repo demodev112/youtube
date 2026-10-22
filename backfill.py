@@ -122,6 +122,7 @@ def judge_all(ai, comments: list[dict], titles: dict) -> tuple[dict, int, int]:
                     "text": c["text"],
                     "video_title": titles.get(c["video_id"], {}).get("title", ""),
                     "parent_text": c["parent_text"],
+                    "parent_is_operator": c.get("parent_is_operator", False),
                     "prev_replies": [],
                 })
                 idmap[i] = c
@@ -263,6 +264,8 @@ def main():
             "video_id": sn.get("videoId", ""),
             "is_reply": bool(pid),
             "parent_text": text_of(parents[pid]["snippet"]) if pid and pid in parents else "",
+            "parent_is_operator": bool(pid and pid in parents) and
+                parents[pid]["snippet"].get("authorChannelId", {}).get("value", "") == my_channel,
         })
     titles = get_video_info(youtube, [c["video_id"] for c in comments])
 

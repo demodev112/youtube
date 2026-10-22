@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       match:
-        description: '차단할 댓글 본문 일부. 여러 개는 | 로 구분'
+        description: '차단할 댓글 본문 일부. 여러 개는 | 로 구분. "@작성자::문구" 는 그 작성자만, 문구 앞 = 는 본문 전체 일치'
         required: true
       max_threads:
         description: '상태별로 훑을 최대 스레드 수'

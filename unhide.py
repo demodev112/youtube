@@ -26,7 +26,8 @@ def list_threads(youtube, channel_id: str, status: str, max_results: int) -> lis
     threads, page_token = [], None
     while True:
         params = {
-            "part": "snippet",
+            # replies 를 같이 받으면 숨겨진 대댓글이 스레드에 딸려 옴 (comments.list 로는 안 나옴)
+            "part": "snippet,replies",
             "allThreadsRelatedToChannelId": channel_id,
             "maxResults": min(max_results - len(threads), 100),
             "order": "time",
@@ -72,6 +73,14 @@ def main():
                 sn.get("authorDisplayName", ""),
                 f"댓글/{status}",
             )
+            # 스레드에 딸려 온 대댓글 (숨겨진 대댓글은 여기로만 나옴)
+            for r in t.get("replies", {}).get("comments", []):
+                rs = r.get("snippet", {})
+                candidates.setdefault(r["id"], (
+                    rs.get("textOriginal", rs.get("textDisplay", "")),
+                    rs.get("authorDisplayName", ""),
+                    f"대댓글/{status}스레드",
+                ))
             if t["snippet"].get("totalReplyCount", 0) > 0:
                 for r in get_replies(youtube, top["id"]):
                     rs = r.get("snippet", {})

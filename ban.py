@@ -34,12 +34,28 @@ from unhide import list_threads, norm
 
 def main():
     parser = argparse.ArgumentParser(description="지정한 댓글 작성자 차단 (1회성)")
-    parser.add_argument("--match", required=True, help="차단할 댓글 본문 일부. 여러 개는 | 로 구분")
+    parser.add_argument(
+        "--match", required=True,
+        help="차단할 댓글 본문 일부. 여러 개는 | 로 구분. "
+             "\"@작성자::문구\" 로 쓰면 그 작성자 댓글만 인정, 문구 앞에 = 를 붙이면 본문 전체 일치",
+    )
     parser.add_argument("--max", type=int, default=400, help="상태별로 훑을 최대 스레드 수")
     parser.add_argument("--dry-run", action="store_true", help="찾기만 하고 바꾸지 않음")
     args = parser.parse_args()
 
-    patterns = [(p.strip(), norm(p)) for p in args.match.split("|") if p.strip()]
+    # 각 패턴: (원문, 기대 작성자 또는 "", 정규화 문구, 전체 일치 여부)
+    patterns = []
+    for p in args.match.split("|"):
+        p = p.strip()
+        if not p:
+            continue
+        author, text_pat = "", p
+        if "::" in p:
+            author, text_pat = (s.strip() for s in p.split("::", 1))
+        exact = text_pat.startswith("=")
+        if exact:
+            text_pat = text_pat[1:]
+        patterns.append((p, author, norm(text_pat), exact))
     if not patterns:
         raise SystemExit("--match 가 비어 있습니다")
 
@@ -53,18 +69,24 @@ def main():
         for t in threads:
             top = t["snippet"]["topLevelComment"]
             candidates.setdefault(top["id"], {**top, "_where": f"댓글/{status}"})
+            # 스레드에 딸려 온 대댓글 (숨겨진 대댓글은 여기로만 나옴)
+            for r in t.get("replies", {}).get("comments", []):
+                candidates.setdefault(r["id"], {**r, "_where": f"대댓글/{status}스레드"})
             if t["snippet"].get("totalReplyCount", 0) > 0:
                 for r in get_replies(youtube, top["id"]):
                     candidates.setdefault(r["id"], {**r, "_where": "대댓글"})
     log.info(f"후보 댓글 {len(candidates)}개 수집")
 
     plan = []
-    for raw, pat in patterns:
+    for raw, want_author, pat, exact in patterns:
         hits = []
         for cid, c in candidates.items():
             sn = c.get("snippet", {})
             text = sn.get("textOriginal") or sn.get("textDisplay", "")
-            if pat in norm(text):
+            if want_author and sn.get("authorDisplayName", "") != want_author:
+                continue
+            body = norm(text)
+            if (body == pat) if exact else (pat in body):
                 hits.append((cid, c, text))
         if not hits:
             log.warning(f"[찾지 못함] \"{raw}\"")

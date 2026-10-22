@@ -1,0 +1,88 @@
+name: 과거 숨김 댓글 재판정·차단 (1회성)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: '숨김을 처리했던 워크플로우 실행 ID (기본: 10/21 400개 일괄 검토)'
+        required: true
+        default: '39545596066'
+      model:
+        description: '재판정에 쓸 AI 모델'
+        required: false
+        default: 'claude-opus-5-5'
+      apply:
+        description: 'true 면 실제로 차단. 기본 false 는 미리보기(보고서만)'
+        required: false
+        default: 'false'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: Google 인증 토큰 복원
+        run: |
+          echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
+
+      - name: 원본 실행 결과 내려받기
+        uses: actions/download-artifact@v4
+        with:
+          pattern: modbot-results-*
+          path: backfill_src
+          merge-multiple: true
+          run-id: ${{ github.event.inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 누적 횟수(기존 심각 횟수, 차단 여부)를 반영하기 위해 최신 누적 데이터를 가져옴
+      - name: 누적 데이터 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: offender_data.json
+          key: modbot-data-${{ github.run_id }}
+          restore-keys: |
+            modbot-data-
+
+      - name: 재판정 실행
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODBOT_MODEL: ${{ github.event.inputs.model }}
+          APPLY: ${{ github.event.inputs.apply }}
+        run: |
+          extra=""
+          if [ "$APPLY" = "true" ]; then extra="--apply"; fi
+          python backfill.py --source backfill_src/offender_data.json $extra
+
+      # 실제 차단한 경우에만 누적 데이터 저장 (다음 자동 실행이 이어받음)
+      - name: 누적 데이터 저장
+        if: github.event.inputs.apply == 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: offender_data.json
+          key: modbot-data-${{ github.run_id }}
+
+      - name: 보고서 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backfill-report-${{ github.run_number }}
+          path: |
+            backfill_report.txt
+            modbot.log
+          retention-days: 30

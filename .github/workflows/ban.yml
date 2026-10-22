@@ -1,0 +1,62 @@
+name: 지정 댓글 작성자 차단 (1회성)
+
+on:
+  workflow_dispatch:
+    inputs:
+      match:
+        description: '차단할 댓글 본문 일부. 여러 개는 | 로 구분'
+        required: true
+      max_threads:
+        description: '상태별로 훑을 최대 스레드 수'
+        required: false
+        default: '400'
+      dry_run:
+        description: 'true 면 찾기만 하고 차단하지 않음'
+        required: false
+        default: 'true'
+
+jobs:
+  ban:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: Google 인증 토큰 복원
+        run: |
+          echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
+
+      - name: 누적 데이터 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: offender_data.json
+          key: modbot-data-${{ github.run_id }}
+          restore-keys: |
+            modbot-data-
+
+      - name: 차단 실행
+        env:
+          MATCH: ${{ github.event.inputs.match }}
+          MAX_THREADS: ${{ github.event.inputs.max_threads }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          extra=""
+          if [ "$DRY_RUN" = "true" ]; then extra="--dry-run"; fi
+          python ban.py --match "$MATCH" --max "${MAX_THREADS:-400}" $extra
+
+      - name: 누적 데이터 저장
+        if: github.event.inputs.dry_run != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: offender_data.json
+          key: modbot-data-${{ github.run_id }}

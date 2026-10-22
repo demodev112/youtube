@@ -217,6 +217,7 @@ NEVER_HIDE_IDS = {
     "UgxmA9iarfRkroGoXDR4AaABAg",  # @siwon04-monkey "형님 처음에 나오는 남자 엉덩이 보고 악플 달 뻔했습니다"
     "UgxiddRU7cPR4_9O0AN4AaABAg",  # @안되면될때까지-z7g "뭐야 이분 직업이 약사였어? 😅"
     "UgzmAoishusKdwQ0wZt4AaABAg",  # @리치-l9z "승모 먼저하란 개소리는..." (운영자가 반박하는 유튜버를 비판)
+    "Ugz0n07uyik1QjNoWO94AaABAg.AbpaeMsJIJ-AbvzY6WDIO6",  # @NacEiche "센세 감사합니다... 책도 좀 리뉴얼 해주시면"
 }
 
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)

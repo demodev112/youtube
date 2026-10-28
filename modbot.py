@@ -221,6 +221,7 @@ NEVER_HIDE_IDS = {
     "UgzmAoishusKdwQ0wZt4AaABAg",  # @리치-l9z "승모 먼저하란 개소리는..." (운영자가 반박하는 유튜버를 비판)
     "Ugz0n07uyik1QjNoWO94AaABAg.AbpaeMsJIJ-AbvzY6WDIO6",  # @NacEiche "센세 감사합니다... 책도 좀 리뉴얼 해주시면"
     "UgzncLXS1jmJLf6MIPF4AaABAg",  # @hhuy4491 "0:29 굳이 해명하는 급진적과부하"
+    "UgxPZj7ql7Nw-6IJgW94AaABAg.AcGbZiO3CaeAcGkhyjTeWt",  # @그녀 "@급진적_과부하 그냥 개인듯" ("개인"을 욕으로 오인)
 }
 
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)

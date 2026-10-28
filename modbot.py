@@ -875,6 +875,7 @@ def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
         top_comment["_is_pinned_reply"] = False
         top_comment["_video_id"] = video_id
         top_comment["_parent_text"] = ""
+        top_comment["_by_owner"] = top_is_operator
         normal_top.append(top_comment)
 
         # 대댓글이 있으면 가져오기 (원댓글 본문을 함께 붙여서 대상 판단에 활용)
@@ -886,6 +887,8 @@ def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
                 r["_video_id"] = r.get("snippet", {}).get("videoId") or video_id
                 r["_parent_text"] = top_text
                 r["_parent_is_operator"] = top_is_operator
+                r["_by_owner"] = bool(owner_channel) and \
+                    r.get("snippet", {}).get("authorChannelId", {}).get("value", "") == owner_channel
                 r["_prev_replies"] = prev_texts[-PREV_REPLY_COUNT:]
                 r_text = r.get("snippet", {}).get("textOriginal", r.get("snippet", {}).get("textDisplay", ""))
                 prev_texts = prev_texts + [r_text]
@@ -960,6 +963,11 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
         else:
             processed_set = set(data["processed"])
             new_comments = [c for c in all_comments if c["id"] not in processed_set]
+        # 운영자 본인이 쓴 댓글·답글은 절대 판단하지 않음
+        own = [c for c in new_comments if c.get("_by_owner")]
+        if own:
+            new_comments = [c for c in new_comments if not c.get("_by_owner")]
+            log.info(f"운영자 본인 댓글 {len(own)}개 건너뜀")
         log.info(f"새 댓글 {len(new_comments)}개 판단 필요 (이미 처리 {len(all_comments) - len(new_comments)}개 건너뜀)")
 
         # 영상별 전용 규칙이 있는 댓글은 따로 묶어서 그 규칙으로 판단 (기본 그룹 키: "")

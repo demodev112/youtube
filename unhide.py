@@ -5,7 +5,7 @@
 사용 예:
   python unhide.py --match "약사세요?|책도 좀 리뉴얼" --max 400 [--dry-run]
 
-- 채널의 검토 대기 스레드 + 최근 공개 스레드(대댓글 포함)를 훑어서
+- 채널의 검토 대기·스팸 의심 스레드 + 최근 공개 스레드(대댓글 포함)를 훑어서
   본문에 패턴(공백 무시)이 포함된 댓글을 찾는다.
 - --dry-run 이면 찾기만 하고 바꾸지 않는다.
 - 복구한 댓글 ID를 로그에 남기므로, modbot.py 의 NEVER_HIDE_IDS 에 넣어 재숨김을 막을 수 있다.
@@ -62,7 +62,8 @@ def main():
     channel_id = get_my_channel_id(youtube)
 
     candidates: dict[str, tuple[str, str, str]] = {}  # id -> (text, author, where)
-    for status in ("heldForReview", "published"):
+    # likelySpam: YouTube 자체 스팸 필터가 "스팸일 수 있음"으로 빼 둔 댓글
+    for status in ("heldForReview", "likelySpam", "published"):
         threads = list_threads(youtube, channel_id, status, args.max)
         log.info(f"{status} 스레드 {len(threads)}개 조회")
         for t in threads:

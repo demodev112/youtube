@@ -8,6 +8,7 @@
 - 채널의 검토 대기·스팸 의심 스레드 + 최근 공개 스레드(대댓글 포함)를 훑어서
   본문에 패턴(공백 무시)이 포함된 댓글을 찾는다.
 - --dry-run 이면 찾기만 하고 바꾸지 않는다.
+- --hide 를 주면 반대로 찾은 댓글을 숨김(검토 대기)으로 바꾼다 (잘못 복구한 댓글을 되돌릴 때)
 - 복구한 댓글 ID를 로그에 남기므로, modbot.py 의 NEVER_HIDE_IDS 에 넣어 재숨김을 막을 수 있다.
 """
 
@@ -52,6 +53,7 @@ def main():
     parser.add_argument("--match", required=True, help="복구할 댓글 본문 일부. 여러 개는 | 로 구분")
     parser.add_argument("--max", type=int, default=400, help="상태별로 훑을 최대 스레드 수")
     parser.add_argument("--dry-run", action="store_true", help="찾기만 하고 바꾸지 않음")
+    parser.add_argument("--hide", action="store_true", help="공개 대신 숨김(검토 대기)으로 바꿈")
     args = parser.parse_args()
 
     patterns = [norm(p) for p in args.match.split("|") if p.strip()]
@@ -110,17 +112,18 @@ def main():
         log.info("dry-run 이므로 변경하지 않음")
         return
 
+    status, verb = ("heldForReview", "숨김") if args.hide else ("published", "복구")
     done = []
     for cid, text, author, where in matched:
         try:
-            youtube.comments().setModerationStatus(id=cid, moderationStatus="published").execute()
+            youtube.comments().setModerationStatus(id=cid, moderationStatus=status).execute()
             done.append(cid)
-            log.info(f"복구 완료: id={cid} @{author}")
+            log.info(f"{verb} 완료: id={cid} @{author}")
         except HttpError as e:
-            log.error(f"복구 실패: id={cid} @{author} | {e}")
+            log.error(f"{verb} 실패: id={cid} @{author} | {e}")
 
-    log.info(f"복구 {len(done)}/{len(matched)}개 완료")
-    if done:
+    log.info(f"{verb} {len(done)}/{len(matched)}개 완료")
+    if done and not args.hide:
         log.info("재숨김 방지용 NEVER_HIDE_IDS 에 추가할 ID: " + ", ".join(f'"{c}"' for c in done))
 
 

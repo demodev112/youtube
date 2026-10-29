@@ -10,6 +10,10 @@ on:
         description: '상태별로 훑을 최대 스레드 수'
         required: false
         default: '400'
+      hide:
+        description: 'true 면 공개 대신 숨김(검토 대기)으로 바꿈 (잘못 복구한 댓글 되돌리기)'
+        required: false
+        default: 'false'
       dry_run:
         description: 'true 면 찾기만 하고 바꾸지 않음'
         required: false
@@ -40,7 +44,9 @@ jobs:
           MATCH: ${{ github.event.inputs.match }}
           MAX_THREADS: ${{ github.event.inputs.max_threads }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
+          HIDE: ${{ github.event.inputs.hide }}
         run: |
           extra=""
           if [ "$DRY_RUN" = "true" ]; then extra="--dry-run"; fi
+          if [ "$HIDE" = "true" ]; then extra="$extra --hide"; fi
           python unhide.py --match "$MATCH" --max "${MAX_THREADS:-400}" $extra

@@ -142,7 +142,7 @@ def judge_all(ai, comments: list[dict], titles: dict) -> tuple[dict, int, int]:
                 for r in results
                 if r.get("action") == "HIDE"
                 and r.get("severity") == "명백"
-                and r.get("target") in ("운영자", "영상")
+                and r.get("target") in ("운영자", "영상", "제품")
                 and r.get("id") in in_map
             ]
             verdicts = {}

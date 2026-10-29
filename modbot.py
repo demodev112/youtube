@@ -222,6 +222,9 @@ NEVER_HIDE_IDS = {
     "Ugz0n07uyik1QjNoWO94AaABAg.AbpaeMsJIJ-AbvzY6WDIO6",  # @NacEiche "센세 감사합니다... 책도 좀 리뉴얼 해주시면"
     "UgzncLXS1jmJLf6MIPF4AaABAg",  # @hhuy4491 "0:29 굳이 해명하는 급진적과부하"
     "UgxPZj7ql7Nw-6IJgW94AaABAg.AcGbZiO3CaeAcGkhyjTeWt",  # @그녀 "@급진적_과부하 그냥 개인듯" ("개인"을 욕으로 오인)
+    "UgxoF8DuLtoaR_IGR7l4AaABAg",  # @Sommelier___ "설명은 좋은데, 용어가 너무 어렵...."
+    "UgyQz8YakdhksGpwjsN4AaABAg.AcGe3wIIvC2AcGhCJqOGq-",  # @ndnd3724 "가려운 부분을 긁어주진 못했네요😂 그래도 항상 잘 보고 있습니다!!"
+    "UgyjA3zPFDEgocTEsoR4AaABAg",  # @시그마플로 "맞는 이야기인데 근거가 부족"
 }
 
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)

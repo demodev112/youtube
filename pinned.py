@@ -14,6 +14,7 @@
 
 import argparse
 import hashlib
+import time
 
 from googleapiclient.errors import HttpError
 
@@ -113,13 +114,20 @@ def apply(youtube, channel_id: str, source: str, target: str):
     text = src["snippet"]["textOriginal"]
     log.info(f"원본 {source}: {text!r}")
     log.info(f"대상 {target} 현재: {dst['snippet']['textOriginal']!r}")
-    youtube.comments().update(part="snippet", body={"id": target, "snippet": {"textOriginal": text}}).execute()
-    after = get_comment(youtube, target)["snippet"]["textOriginal"]
-    log.info(f"대상 {target} 수정 후: {after!r}")
-    if after == text:
-        log.info("수정 완료: 원본과 글자 하나까지 같음")
-    else:
-        raise SystemExit("수정은 됐지만 원본과 다름 — 위 두 줄을 비교해서 확인 필요")
+    if dst["snippet"]["textOriginal"] == text:
+        log.info("대상 본문이 이미 원본과 같음 — 수정하지 않음")
+        return
+    resp = youtube.comments().update(part="snippet", body={"id": target, "snippet": {"textOriginal": text}}).execute()
+    log.info(f"수정 요청 응답 본문: {resp.get('snippet', {}).get('textOriginal')!r} (수정 시각 {resp.get('snippet', {}).get('updatedAt')})")
+    # 수정 직후에는 이전 본문이 읽힐 수 있어서 잠시 기다리며 몇 번 다시 읽음
+    for wait in (0, 10, 30, 60):
+        time.sleep(wait)
+        after = get_comment(youtube, target)["snippet"]["textOriginal"]
+        log.info(f"대상 {target} 수정 후 ({wait}초 뒤 읽음): {after!r}")
+        if after == text:
+            log.info("수정 완료: 원본과 글자 하나까지 같음")
+            return
+    raise SystemExit("수정 요청은 성공했지만 다시 읽은 본문이 원본과 다름 — 확인 필요")
 
 
 def main():

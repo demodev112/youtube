@@ -13,6 +13,7 @@
 """
 
 import argparse
+import hashlib
 
 from googleapiclient.errors import HttpError
 
@@ -52,7 +53,8 @@ def show_comment(c: dict):
     sn = c["snippet"]
     text = sn.get("textOriginal", "")
     log.info(f"    id={c['id']} 작성 {sn.get('publishedAt')} 수정 {sn.get('updatedAt')} 좋아요 {sn.get('likeCount')}")
-    log.info(f"    본문 길이 {len(text)}자, 줄 수 {text.count(chr(10)) + 1}")
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    log.info(f"    본문 길이 {len(text)}자, 줄 수 {text.count(chr(10)) + 1}, 지문 {digest} (지문이 같으면 글자 하나까지 같은 본문)")
     log.info(f"    원문(repr): {text!r}")
 
 
@@ -73,7 +75,7 @@ def inspect(youtube, channel_id: str, videos: list[str]):
     ch = youtube.channels().list(part="contentDetails", mine=True).execute()["items"][0]
     uploads = ch["contentDetails"]["relatedPlaylists"]["uploads"]
     items = youtube.playlistItems().list(part="snippet,contentDetails", playlistId=uploads,
-                                         maxResults=8).execute().get("items", [])
+                                         maxResults=30).execute().get("items", [])
     ids = [it["contentDetails"]["videoId"] for it in items]
     meta = {v["id"]: v for v in youtube.videos().list(part="snippet,status,contentDetails",
                                                       id=",".join(ids)).execute().get("items", [])}
@@ -84,8 +86,15 @@ def inspect(youtube, channel_id: str, videos: list[str]):
         log.info(f"  {vid} | 공개 {st.get('privacyStatus')} 예약 {st.get('publishAt')} | "
                  f"게시 {m.get('snippet', {}).get('publishedAt')} | 길이 {m.get('contentDetails', {}).get('duration')} | "
                  f"{m.get('snippet', {}).get('title')}")
-    public = [vid for vid in ids if meta.get(vid, {}).get("status", {}).get("privacyStatus") == "public"]
-    for vid in public[:2]:
+    # 운영자 댓글을 보여줄 영상: 가장 최근 업로드 3개 + 가장 최근 공개 롱폼(3분 초과) 1개
+    def seconds(vid):
+        import re
+        d = meta.get(vid, {}).get("contentDetails", {}).get("duration", "")
+        m = re.fullmatch(r"P(?:\d+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d or "")
+        return sum(int(x or 0) * k for x, k in zip(m.groups(), (3600, 60, 1))) if m else 0
+    longform = [vid for vid in ids if meta.get(vid, {}).get("status", {}).get("privacyStatus") == "public"
+                and seconds(vid) > 180]
+    for vid in list(dict.fromkeys(ids[:3] + longform[:1])):
         show_video(youtube, vid, channel_id, meta[vid]["snippet"]["title"])
 
 

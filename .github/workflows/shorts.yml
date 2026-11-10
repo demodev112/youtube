@@ -1,0 +1,27 @@
+name: 쇼츠 조회수 순 목록 (읽기 전용)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  shorts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: Google 인증 토큰 복원
+        run: |
+          echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
+
+      - name: 실행
+        run: python shorts.py

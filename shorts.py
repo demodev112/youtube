@@ -33,6 +33,25 @@ def playlist_video_ids(youtube, playlist_id: str) -> list[str]:
             return ids
 
 
+def search_my_videos(youtube, max_pages: int = 15) -> list[str]:
+    """search.list(forMine) 로 내 영상 ID 수집. 페이지당 할당량 100 이라 페이지 수 제한."""
+    ids, token = [], None
+    for _ in range(max_pages):
+        params = {"part": "id", "forMine": True, "type": "video", "maxResults": 50}
+        if token:
+            params["pageToken"] = token
+        try:
+            resp = youtube.search().list(**params).execute()
+        except HttpError as e:
+            log.warning(f"검색(내 영상) 조회 실패: {e}")
+            break
+        ids += [it["id"]["videoId"] for it in resp.get("items", []) if it.get("id", {}).get("videoId")]
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    return ids
+
+
 def video_meta(youtube, ids: list[str]) -> dict[str, dict]:
     meta = {}
     for i in range(0, len(ids), 50):
@@ -70,22 +89,35 @@ def main():
     uploads = youtube.channels().list(part="contentDetails", id=channel_id).execute()[
         "items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-    all_ids = playlist_video_ids(youtube, uploads)
-    meta = video_meta(youtube, all_ids)
-    log.info(f"업로드 목록 영상 {len(all_ids)}개, 상세 정보 조회 {len(meta)}개")
+    stats = youtube.channels().list(part="statistics", id=channel_id).execute()["items"][0]["statistics"]
+    log.info(f"채널 통계상 영상 수(공개): {stats.get('videoCount')}")
 
-    shorts_playlist = "UUSH" + channel_id[2:]
-    try:
-        shorts_ids = playlist_video_ids(youtube, shorts_playlist)
-        log.info(f"쇼츠 전용 목록({shorts_playlist}) 영상 {len(shorts_ids)}개")
-    except HttpError as e:
-        shorts_ids = []
-        log.warning(f"쇼츠 전용 목록 조회 실패 — 길이와 주소 확인으로만 판별: {e}")
+    # 업로드 목록 하나만으로는 빠지는 영상이 있어서, 여러 출처를 합쳐서 전체 영상을 모음
+    sources: dict[str, list[str]] = {}
+    for name, pid in (("업로드 전체", uploads), ("쇼츠 전용", "UUSH" + channel_id[2:]),
+                      ("롱폼 전용", "UULF" + channel_id[2:]), ("라이브 전용", "UULV" + channel_id[2:])):
+        try:
+            sources[name] = playlist_video_ids(youtube, pid)
+        except HttpError as e:
+            sources[name] = []
+            log.warning(f"{name} 목록({pid}) 조회 실패: {e}")
+    sources["검색(내 영상)"] = search_my_videos(youtube)
+    for name, ids in sources.items():
+        log.info(f"출처 {name}: {len(ids)}개 (중복 제외 {len(set(ids))}개)")
+
+    shorts_ids = sources["쇼츠 전용"]
     in_list = set(shorts_ids)
-    missing_meta = [v for v in shorts_ids if v not in meta]
-    if missing_meta:
-        log.warning(f"쇼츠 목록에는 있는데 업로드 목록에 없는 영상 {len(missing_meta)}개: {missing_meta}")
-        meta.update(video_meta(youtube, missing_meta))
+    union = list(dict.fromkeys(v for ids in sources.values() for v in ids))
+    meta = video_meta(youtube, union)
+    log.info(f"모든 출처 합계 영상 {len(union)}개, 상세 정보 조회 {len(meta)}개")
+    no_meta = [v for v in union if v not in meta]
+    if no_meta:
+        log.warning(f"상세 정보가 안 나오는 영상 {len(no_meta)}개 (삭제됐을 가능성): {no_meta}")
+    for name, ids in sources.items():
+        if name != "업로드 전체":
+            only = [v for v in set(ids) if v not in set(sources["업로드 전체"])]
+            if only:
+                log.info(f"{name} 에는 있는데 업로드 전체 목록에 없는 영상 {len(only)}개")
 
     shorts, notes = set(in_list), []
     for vid, m in meta.items():

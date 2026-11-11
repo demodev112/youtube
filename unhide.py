@@ -10,6 +10,8 @@
 - --dry-run 이면 찾기만 하고 바꾸지 않는다.
 - --hide 를 주면 반대로 찾은 댓글을 숨김(검토 대기)으로 바꾼다 (잘못 복구한 댓글을 되돌릴 때)
 - 복구한 댓글 ID를 로그에 남기므로, modbot.py 의 NEVER_HIDE_IDS 에 넣어 재숨김을 막을 수 있다.
+- --owner-reply-only: 운영자가 답글을 단 최상위 댓글만 복구한다. 숨긴 댓글의 답글은 숨김 상태에서는
+  읽히지 않아서, 공개로 바꾼 직후 답글을 읽고 운영자 답글이 없으면 바로 숨김으로 되돌린다.
 """
 
 import argparse
@@ -54,6 +56,8 @@ def main():
     parser.add_argument("--max", type=int, default=400, help="상태별로 훑을 최대 스레드 수")
     parser.add_argument("--dry-run", action="store_true", help="찾기만 하고 바꾸지 않음")
     parser.add_argument("--hide", action="store_true", help="공개 대신 숨김(검토 대기)으로 바꿈")
+    parser.add_argument("--owner-reply-only", action="store_true",
+                        help="운영자 답글이 달린 최상위 댓글만 복구 (없으면 즉시 숨김으로 되돌림)")
     args = parser.parse_args()
 
     patterns = [norm(p) for p in args.match.split("|") if p.strip()]
@@ -124,15 +128,34 @@ def main():
         log.info("dry-run 이므로 변경하지 않음")
         return
 
+    if args.owner_reply_only:
+        if args.hide:
+            raise SystemExit("--owner-reply-only 와 --hide 는 함께 쓸 수 없습니다")
+        before = len(matched)
+        matched = [m for m in matched if m[0] in thread_replies and thread_replies[m[0]][0] > 0]
+        log.info(f"답글이 있는 최상위 댓글만 남김: {before}개 → {len(matched)}개")
+
     status, verb = ("heldForReview", "숨김") if args.hide else ("published", "복구")
     done = []
     for cid, text, author, where in matched:
         try:
             youtube.comments().setModerationStatus(id=cid, moderationStatus=status).execute()
-            done.append(cid)
-            log.info(f"{verb} 완료: id={cid} @{author}")
         except HttpError as e:
             log.error(f"{verb} 실패: id={cid} @{author} | {e}")
+            continue
+        if args.owner_reply_only:
+            replies = get_replies(youtube, cid)
+            owner = [r["snippet"].get("textOriginal", r["snippet"].get("textDisplay", "")) for r in replies
+                     if r.get("snippet", {}).get("authorChannelId", {}).get("value") == channel_id]
+            for r in replies:
+                rs = r.get("snippet", {})
+                log.info(f"    └ @{rs.get('authorDisplayName', '')} | \"{rs.get('textOriginal', rs.get('textDisplay', ''))[:120]}\"")
+            if not owner:
+                youtube.comments().setModerationStatus(id=cid, moderationStatus="heldForReview").execute()
+                log.info(f"운영자 답글 없음 → 숨김으로 되돌림: id={cid} @{author}")
+                continue
+        done.append(cid)
+        log.info(f"{verb} 완료: id={cid} @{author}")
 
     log.info(f"{verb} {len(done)}/{len(matched)}개 완료")
     if done and not args.hide:

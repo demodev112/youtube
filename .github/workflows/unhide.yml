@@ -18,6 +18,10 @@ on:
         description: 'true 면 찾기만 하고 바꾸지 않음'
         required: false
         default: 'false'
+      owner_reply_only:
+        description: 'true 면 운영자 답글이 달린 최상위 댓글만 복구 (없으면 즉시 숨김으로 되돌림)'
+        required: false
+        default: 'false'
 
 jobs:
   unhide:
@@ -45,8 +49,10 @@ jobs:
           MAX_THREADS: ${{ github.event.inputs.max_threads }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
           HIDE: ${{ github.event.inputs.hide }}
+          OWNER_REPLY_ONLY: ${{ github.event.inputs.owner_reply_only }}
         run: |
           extra=""
           if [ "$DRY_RUN" = "true" ]; then extra="--dry-run"; fi
           if [ "$HIDE" = "true" ]; then extra="$extra --hide"; fi
+          if [ "$OWNER_REPLY_ONLY" = "true" ]; then extra="$extra --owner-reply-only"; fi
           python unhide.py --match "$MATCH" --max "${MAX_THREADS:-400}" $extra

@@ -15,10 +15,15 @@
 """
 
 import argparse
+import time
 
 from googleapiclient.errors import HttpError
 
 from modbot import get_authenticated_service, get_my_channel_id, get_replies, log
+
+
+# --owner-reply-only: 공개 직후 답글을 다시 읽을 때 기다리는 시간(초)
+REPLY_READ_WAITS = (0, 10, 30, 60)
 
 
 def norm(s: str) -> str:
@@ -144,7 +149,14 @@ def main():
             log.error(f"{verb} 실패: id={cid} @{author} | {e}")
             continue
         if args.owner_reply_only:
-            replies = get_replies(youtube, cid)
+            # 공개로 바꾼 직후에는 답글이 바로 읽히지 않는다 → 시간을 두고 몇 번 다시 읽는다
+            replies = []
+            for wait in REPLY_READ_WAITS:
+                time.sleep(wait)
+                replies = get_replies(youtube, cid)
+                if replies:
+                    break
+                log.info(f"    답글이 아직 안 읽힘 ({wait}초 뒤)")
             owner = [r["snippet"].get("textOriginal", r["snippet"].get("textDisplay", "")) for r in replies
                      if r.get("snippet", {}).get("authorChannelId", {}).get("value") == channel_id]
             for r in replies:
@@ -152,7 +164,8 @@ def main():
                 log.info(f"    └ @{rs.get('authorDisplayName', '')} | \"{rs.get('textOriginal', rs.get('textDisplay', ''))[:120]}\"")
             if not owner:
                 youtube.comments().setModerationStatus(id=cid, moderationStatus="heldForReview").execute()
-                log.info(f"운영자 답글 없음 → 숨김으로 되돌림: id={cid} @{author}")
+                why = "답글을 끝내 읽지 못함" if not replies else "운영자 답글 없음"
+                log.info(f"{why} → 숨김으로 되돌림: id={cid} @{author}")
                 continue
         done.append(cid)
         log.info(f"{verb} 완료: id={cid} @{author}")

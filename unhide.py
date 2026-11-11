@@ -165,6 +165,19 @@ def main():
     status, verb = ("heldForReview", "숨김") if args.hide else ("published", "복구")
     done = []
     for cid, text, author, where in matched:
+        if args.hide:
+            # 숨김은 요청이 성공해도 공개로 남는 경우가 있어서, 정말 숨겨졌는지 확인하고 아니면 다시 요청한다
+            try:
+                ok = hide_and_verify(youtube, cid)
+            except HttpError as e:
+                log.error(f"{verb} 실패: id={cid} @{author} | {e}")
+                continue
+            if not ok:
+                log.error(f"{verb} 요청은 보냈지만 아직 공개 상태: id={cid} @{author} — 확인 필요")
+                continue
+            done.append(cid)
+            log.info(f"{verb} 완료(확인됨): id={cid} @{author}")
+            continue
         try:
             youtube.comments().setModerationStatus(id=cid, moderationStatus=status).execute()
         except HttpError as e:

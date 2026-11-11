@@ -361,6 +361,10 @@ MODERATION_PROMPT = """
 - 단, 직업이 약사인지 단순히 확인하는 말은 OK: "약사세요?", "뭐야 이분 직업이 약사였어? 😅"
 - "진짜 약사 맞나요?", "정말 약사예요?"처럼 진짜인지 의심하는 말은 확인이 아니라 자격 의심 → HIDE (숨김만)
   비꼬거나 깎아내리는 말이 붙으면 명백: "이것도 모르는데 진짜 약사 맞나요? ㅋ", "약사 맞음? 면허 산 듯"
+- ★ 단, 입력에 "운영자가 이 댓글에 단 답글"이 있고 운영자가 거기서 약사가 맞다고 직접 답했으면,
+  약사인지 묻거나 의심하는 질문이어도 → OK (숨기지 않음). 운영자가 공개적으로 답한 대화이기 때문
+  예: 댓글 "진짜 약사 맞나요?" + 운영자 답글 "네 약사 맞습니다" → OK
+  (비꼬거나 깎아내리는 말이 붙은 명백한 경우는 운영자가 답했어도 위 규칙대로 판단)
 
 ★ 이전 영상이 사라졌다/없어졌다/비공개됐다고 묻거나 언급하는 댓글 → OK (숨기지 않음)
 - 운영자가 일부 과거 영상을 비공개 처리했음. 그 영상의 행방을 묻거나 다시 올려 달라는 것만으로는 숨기지 않는다
@@ -678,6 +682,9 @@ def format_comment_for_ai(c: dict) -> str:
         for p in prev:
             lines.append(f'    - {p[:PREV_REPLY_MAX_CHARS]}')
     lines.append(f'  댓글: {c["text"][:500]}')
+    owner = [o.strip() for o in (c.get("owner_replies") or []) if o and o.strip()]
+    for o in owner:
+        lines.append(f'  운영자가 이 댓글에 단 답글: {o[:PARENT_TEXT_MAX_CHARS]}')
     return "\n".join(lines)
 
 def ai_judge_batch(client: anthropic.Anthropic, comments: list[dict], extra_rules: str = "") -> list[dict]:
@@ -929,6 +936,7 @@ def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
             thread_id = top_comment["id"]
             replies = get_replies(youtube, thread_id, is_pinned=thread.get("_is_pinned", False))
             prev_texts = []
+            owner_replies = []
             for r in replies:
                 r["_video_id"] = r.get("snippet", {}).get("videoId") or video_id
                 r["_parent_text"] = top_text
@@ -938,6 +946,10 @@ def collect_all_comments(youtube, threads: list[dict]) -> list[dict]:
                 r["_prev_replies"] = prev_texts[-PREV_REPLY_COUNT:]
                 r_text = r.get("snippet", {}).get("textOriginal", r.get("snippet", {}).get("textDisplay", ""))
                 prev_texts = prev_texts + [r_text]
+                if r["_by_owner"]:
+                    owner_replies.append(r_text)
+            # 운영자가 이 댓글에 직접 단 답글 — "약사 맞습니다" 처럼 공개적으로 답한 질문은 숨기지 않는다
+            top_comment["_owner_replies"] = owner_replies
             if thread.get("_is_pinned"):
                 pinned_replies.extend(replies)
             else:
@@ -1053,6 +1065,7 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
                     "parent_is_operator": comment.get("_parent_is_operator", False),
                     # 앞선 답글은 전용 규칙 영상에서만 전달 (다른 영상 동작 불변)
                     "prev_replies": comment.get("_prev_replies", []) if group_key else [],
+                    "owner_replies": comment.get("_owner_replies", []),
                 })
                 comment_map[i] = comment
 

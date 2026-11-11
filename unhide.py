@@ -64,6 +64,8 @@ def main():
     channel_id = get_my_channel_id(youtube)
 
     candidates: dict[str, tuple[str, str, str]] = {}  # id -> (text, author, where)
+    # 최상위 댓글 id -> (답글 수, [(작성자, 본문)]) — 일치한 댓글에 어떤 답글이 달렸는지 보여 주려고 모은다
+    thread_replies: dict[str, tuple[int, list[tuple[str, str]]]] = {}
     # likelySpam: YouTube 자체 스팸 필터가 "스팸일 수 있음"으로 빼 둔 댓글
     for status in ("heldForReview", "likelySpam", "published"):
         threads = list_threads(youtube, channel_id, status, args.max)
@@ -76,9 +78,11 @@ def main():
                 sn.get("authorDisplayName", ""),
                 f"댓글/{status}",
             )
+            seen_replies: dict[str, tuple[str, str]] = {}
             # 스레드에 딸려 온 대댓글 (숨겨진 대댓글은 여기로만 나옴)
             for r in t.get("replies", {}).get("comments", []):
                 rs = r.get("snippet", {})
+                seen_replies[r["id"]] = (rs.get("authorDisplayName", ""), rs.get("textOriginal", rs.get("textDisplay", "")))
                 candidates.setdefault(r["id"], (
                     rs.get("textOriginal", rs.get("textDisplay", "")),
                     rs.get("authorDisplayName", ""),
@@ -87,11 +91,13 @@ def main():
             if t["snippet"].get("totalReplyCount", 0) > 0:
                 for r in get_replies(youtube, top["id"]):
                     rs = r.get("snippet", {})
+                    seen_replies[r["id"]] = (rs.get("authorDisplayName", ""), rs.get("textOriginal", rs.get("textDisplay", "")))
                     candidates[r["id"]] = (
                         rs.get("textOriginal", rs.get("textDisplay", "")),
                         rs.get("authorDisplayName", ""),
                         f"대댓글/{status}스레드",
                     )
+            thread_replies[top["id"]] = (t["snippet"].get("totalReplyCount", 0), list(seen_replies.values()))
     log.info(f"후보 댓글 {len(candidates)}개 수집")
 
     matched = []
@@ -107,6 +113,12 @@ def main():
     log.info(f"일치 {len(matched)}개:")
     for cid, text, author, where in matched:
         log.info(f"  [{where}] id={cid} @{author} | \"{text[:80]}\"")
+        if cid in thread_replies:
+            count, replies = thread_replies[cid]
+            if count or replies:
+                log.info(f"      답글 {count}개 (읽힌 것 {len(replies)}개)")
+            for r_author, r_text in replies:
+                log.info(f"      └ @{r_author} | \"{r_text[:80]}\"")
 
     if args.dry_run:
         log.info("dry-run 이므로 변경하지 않음")

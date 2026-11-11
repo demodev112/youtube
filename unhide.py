@@ -86,6 +86,8 @@ def main():
     parser.add_argument("--max", type=int, default=400, help="상태별로 훑을 최대 스레드 수")
     parser.add_argument("--dry-run", action="store_true", help="찾기만 하고 바꾸지 않음")
     parser.add_argument("--hide", action="store_true", help="공개 대신 숨김(검토 대기)으로 바꿈")
+    parser.add_argument("--remove-if-hide-fails", action="store_true",
+                        help="--hide 가 반영되지 않으면 삭제(rejected, 작성자 차단 없음)로 공개에서 내린다")
     parser.add_argument("--owner-reply-only", action="store_true",
                         help="운영자 답글이 달린 최상위 댓글만 복구 (없으면 즉시 숨김으로 되돌림)")
     args = parser.parse_args()
@@ -174,6 +176,18 @@ def main():
                 ok = hide_and_verify(youtube, cid)
             except HttpError as e:
                 log.error(f"{verb} 실패: id={cid} @{author} | {e}")
+                continue
+            if not ok and args.remove_if_hide_fails:
+                youtube.comments().setModerationStatus(id=cid, moderationStatus="rejected").execute()
+                for wait in HIDE_VERIFY_WAITS:
+                    time.sleep(wait)
+                    if not is_visible(youtube, cid):
+                        break
+                if is_visible(youtube, cid):
+                    log.error(f"숨김도 삭제도 반영되지 않음: id={cid} @{author} — 확인 필요")
+                    continue
+                done.append(cid)
+                log.info(f"숨김이 반영되지 않아 삭제(작성자 차단 없음)로 공개에서 내림(확인됨): id={cid} @{author}")
                 continue
             if not ok:
                 log.error(f"{verb} 요청은 보냈지만 아직 공개 상태: id={cid} @{author} — 확인 필요")

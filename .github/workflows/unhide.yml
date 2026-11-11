@@ -18,6 +18,10 @@ on:
         description: 'true 면 찾기만 하고 바꾸지 않음'
         required: false
         default: 'false'
+      remove_if_hide_fails:
+        description: 'hide 가 true 일 때, 숨김이 반영되지 않으면 삭제(작성자 차단 없음)로 공개에서 내림'
+        required: false
+        default: 'false'
       owner_reply_only:
         description: 'true 면 운영자 답글이 달린 최상위 댓글만 복구 (없으면 숨김으로 되돌리지만 YouTube 가 반영 안 할 수 있음)'
         required: false
@@ -50,9 +54,11 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run }}
           HIDE: ${{ github.event.inputs.hide }}
           OWNER_REPLY_ONLY: ${{ github.event.inputs.owner_reply_only }}
+          REMOVE_IF_HIDE_FAILS: ${{ github.event.inputs.remove_if_hide_fails }}
         run: |
           extra=""
           if [ "$DRY_RUN" = "true" ]; then extra="--dry-run"; fi
           if [ "$HIDE" = "true" ]; then extra="$extra --hide"; fi
           if [ "$OWNER_REPLY_ONLY" = "true" ]; then extra="$extra --owner-reply-only"; fi
+          if [ "$REMOVE_IF_HIDE_FAILS" = "true" ]; then extra="$extra --remove-if-hide-fails"; fi
           python unhide.py --match "$MATCH" --max "${MAX_THREADS:-400}" $extra

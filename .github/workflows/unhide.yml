@@ -19,7 +19,7 @@ on:
         required: false
         default: 'false'
       owner_reply_only:
-        description: 'true 면 운영자 답글이 달린 최상위 댓글만 복구 (없으면 즉시 숨김으로 되돌림)'
+        description: 'true 면 운영자 답글이 달린 최상위 댓글만 복구 (없으면 숨김으로 되돌리지만 YouTube 가 반영 안 할 수 있음)'
         required: false
         default: 'false'
 

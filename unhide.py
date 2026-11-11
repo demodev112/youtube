@@ -26,6 +26,28 @@ from modbot import get_authenticated_service, get_my_channel_id, get_replies, lo
 REPLY_READ_WAITS = (0, 10, 30, 60)
 
 
+# 숨김으로 되돌린 뒤 정말 숨겨졌는지 확인할 때 기다리는 시간(초).
+# 공개 직후 바로 숨김으로 되돌리면 순서가 뒤집혀 공개로 남는 경우가 있었다(2026-11-11).
+HIDE_VERIFY_WAITS = (5, 15, 30, 60)
+
+
+def is_visible(youtube, cid: str) -> bool:
+    """comments.list(id=…) 는 공개된 댓글만 돌려준다."""
+    resp = youtube.comments().list(part="id", id=cid).execute()
+    return bool(resp.get("items"))
+
+
+def hide_and_verify(youtube, cid: str) -> bool:
+    youtube.comments().setModerationStatus(id=cid, moderationStatus="heldForReview").execute()
+    for wait in HIDE_VERIFY_WAITS:
+        time.sleep(wait)
+        if not is_visible(youtube, cid):
+            return True
+        log.info(f"    아직 공개 상태로 보임 ({wait}초 뒤) → 다시 숨김 요청")
+        youtube.comments().setModerationStatus(id=cid, moderationStatus="heldForReview").execute()
+    return False
+
+
 def norm(s: str) -> str:
     return "".join((s or "").split())
 
@@ -163,9 +185,11 @@ def main():
                 rs = r.get("snippet", {})
                 log.info(f"    └ @{rs.get('authorDisplayName', '')} | \"{rs.get('textOriginal', rs.get('textDisplay', ''))[:120]}\"")
             if not owner:
-                youtube.comments().setModerationStatus(id=cid, moderationStatus="heldForReview").execute()
                 why = "답글을 끝내 읽지 못함" if not replies else "운영자 답글 없음"
-                log.info(f"{why} → 숨김으로 되돌림: id={cid} @{author}")
+                if hide_and_verify(youtube, cid):
+                    log.info(f"{why} → 숨김으로 되돌림(확인됨): id={cid} @{author}")
+                else:
+                    log.error(f"{why} → 숨김으로 되돌리려 했지만 아직 공개 상태: id={cid} @{author} — 확인 필요")
                 continue
         done.append(cid)
         log.info(f"{verb} 완료: id={cid} @{author}")

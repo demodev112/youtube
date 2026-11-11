@@ -225,6 +225,7 @@ NEVER_HIDE_IDS = {
     "UgxoF8DuLtoaR_IGR7l4AaABAg",  # @Sommelier___ "설명은 좋은데, 용어가 너무 어렵...."
     "UgyQz8YakdhksGpwjsN4AaABAg.AcGe3wIIvC2AcGhCJqOGq-",  # @ndnd3724 "가려운 부분을 긁어주진 못했네요😂 그래도 항상 잘 보고 있습니다!!"
     "Ugyua6ELK4REoBMh6xN4AaABAg",  # @kihagod "혹시 삼두 티어 리스트 영상이 갑자기 안뜨는데 삭제하신건가요" (운영자 답글 있음)
+    "UgwsDCM4pxK5DCnzJnN4AaABAg",  # @sssfefwfwefwef "실제약사맞나요??" (운영자 답글 "넵")
 }
 
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)

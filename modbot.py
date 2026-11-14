@@ -228,6 +228,21 @@ NEVER_HIDE_IDS = {
     "UgwsDCM4pxK5DCnzJnN4AaABAg",  # @sssfefwfwefwef "실제약사맞나요??" (운영자 답글 "넵")
 }
 
+# 이 단어가 들어간 댓글은 AI 판단 없이 숨김만 한다 (차단 안 함, 차단 누적 횟수에도 넣지 않음).
+# 띄어쓰기는 무시하고 찾는다. 2026-11-14 운영자 요청: "격과서" 들어간 댓글은 앞으로 숨김.
+# 이미 처리한 댓글은 다시 보지 않으므로 추가한 시점 이후에 들어온 댓글에만 적용된다.
+KEYWORD_HIDE_WORDS = ["격과서"]
+
+
+def keyword_hide_word(text: str) -> str | None:
+    """본문에 숨김 지정 단어가 있으면 그 단어를, 없으면 None."""
+    flat = "".join((text or "").split())
+    for w in KEYWORD_HIDE_WORDS:
+        if "".join(w.split()) in flat:
+            return w
+    return None
+
+
 # AI 응답을 이 스키마의 JSON으로 강제 (파싱 실패 방지)
 RESULT_SCHEMA = {
     "type": "object",
@@ -1028,6 +1043,28 @@ def run_moderation(max_comments: int = 200, video_input: str = None):
             new_comments = [c for c in new_comments if not c.get("_by_owner")]
             log.info(f"운영자 본인 댓글 {len(own)}개 건너뜀")
         log.info(f"새 댓글 {len(new_comments)}개 판단 필요 (이미 처리 {len(all_comments) - len(new_comments)}개 건너뜀)")
+
+        # 지정 단어가 들어간 댓글은 AI 판단 없이 숨김만 (차단 안 함, 차단 누적 횟수에 넣지 않음)
+        keyword_left = []
+        for c in new_comments:
+            sn = c.get("snippet", {})
+            text = sn.get("textOriginal", sn.get("textDisplay", ""))
+            word = keyword_hide_word(text)
+            if not word or c["id"] in NEVER_HIDE_IDS:
+                keyword_left.append(c)
+                continue
+            data["processed"].append(c["id"])
+            scanned_count += 1
+            tag = "↩대댓글" if c.get("_is_reply") else "💬댓글"
+            try:
+                hide_comment(youtube, c["id"])
+                hidden_count += 1
+                log.info(f"숨김 {tag} (지정 단어 '{word}'): @{sn.get('authorDisplayName', '알 수 없음')} | \"{text[:40]}...\"")
+            except HttpError as e:
+                log.error(f"숨김 실패 ({c['id']}): {e}")
+        if len(keyword_left) != len(new_comments):
+            log.info(f"지정 단어로 숨김 처리 {len(new_comments) - len(keyword_left)}개 (AI 판단 제외)")
+        new_comments = keyword_left
 
         # 영상별 전용 규칙이 있는 댓글은 따로 묶어서 그 규칙으로 판단 (기본 그룹 키: "")
         groups: dict[str, list[dict]] = {}

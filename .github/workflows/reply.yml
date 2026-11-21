@@ -1,0 +1,60 @@
+name: 운영자 답글 수정 · 같은 답글 달기 (1회성)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'edit (운영자 댓글 본문 수정) 또는 reply (여러 댓글에 같은 답글 달기)'
+        required: true
+        default: 'reply'
+      target:
+        description: 'edit: 수정할 운영자 댓글 ID'
+        required: false
+        default: ''
+      parents:
+        description: 'reply: 답글을 달 최상위 댓글 ID, 쉼표로 구분'
+        required: false
+        default: ''
+      text:
+        description: '수정할 본문 또는 달 답글 본문'
+        required: true
+      dry_run:
+        description: 'reply: true 면 원댓글과 기존 답글만 보여 주고 달지 않음'
+        required: false
+        default: 'true'
+
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: Google 인증 토큰 복원
+        run: |
+          echo '${{ secrets.GOOGLE_TOKEN_JSON }}' > token.json
+
+      - name: 실행
+        env:
+          MODE: ${{ github.event.inputs.mode }}
+          TARGET: ${{ github.event.inputs.target }}
+          PARENTS: ${{ github.event.inputs.parents }}
+          TEXT: ${{ github.event.inputs.text }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$MODE" = "edit" ]; then
+            python reply.py edit --target "$TARGET" --text "$TEXT"
+          else
+            extra=""
+            if [ "$DRY_RUN" = "true" ]; then extra="--dry-run"; fi
+            python reply.py reply --parents "$PARENTS" --text "$TEXT" $extra
+          fi

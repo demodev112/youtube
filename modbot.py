@@ -226,6 +226,7 @@ NEVER_HIDE_IDS = {
     "UgyQz8YakdhksGpwjsN4AaABAg.AcGe3wIIvC2AcGhCJqOGq-",  # @ndnd3724 "가려운 부분을 긁어주진 못했네요😂 그래도 항상 잘 보고 있습니다!!"
     "Ugyua6ELK4REoBMh6xN4AaABAg",  # @kihagod "혹시 삼두 티어 리스트 영상이 갑자기 안뜨는데 삭제하신건가요" (운영자 답글 있음)
     "UgwsDCM4pxK5DCnzJnN4AaABAg",  # @sssfefwfwefwef "실제약사맞나요??" (운영자 답글 "넵")
+    "UgyAGSMwK0Vrvdkmqhh4AaABAg",  # 캐나다 해외결제 문의 (운영자 요청으로 복구 · 해외결제 가능 답글)
 }
 
 # 이 단어가 들어간 댓글은 AI 판단 없이 숨김만 한다 (차단 안 함, 차단 누적 횟수에도 넣지 않음).

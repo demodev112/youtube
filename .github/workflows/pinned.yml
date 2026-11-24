@@ -19,6 +19,10 @@ on:
         description: 'apply: 본문을 바꿀 운영자 댓글 ID'
         required: false
         default: ''
+      text:
+        description: 'post: source 대신 직접 쓸 본문 (source 와 둘 중 하나만)'
+        required: false
+        default: ''
       video:
         description: 'post: 댓글을 달 영상 ID'
         required: false
@@ -54,13 +58,14 @@ jobs:
           VIDEOS: ${{ github.event.inputs.videos }}
           SOURCE: ${{ github.event.inputs.source }}
           TARGET: ${{ github.event.inputs.target }}
+          TEXT: ${{ github.event.inputs.text }}
           VIDEO: ${{ github.event.inputs.video }}
           EXPECT_TITLE: ${{ github.event.inputs.expect_title }}
         run: |
           if [ "$MODE" = "apply" ]; then
             python pinned.py apply --source "$SOURCE" --target "$TARGET"
           elif [ "$MODE" = "post" ]; then
-            python pinned.py post --source "$SOURCE" --video "$VIDEO" --expect-title "$EXPECT_TITLE"
+            python pinned.py post --source "$SOURCE" --text "$TEXT" --video "$VIDEO" --expect-title "$EXPECT_TITLE"
           else
             python pinned.py inspect --videos "$VIDEOS"
           fi

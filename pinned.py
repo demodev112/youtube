@@ -6,10 +6,11 @@
   python pinned.py inspect --videos 4M6ZT284HXQ,_EyS30r10Ng
   python pinned.py apply --source <원본 댓글 ID> --target <수정할 댓글 ID>
   python pinned.py post --source <원본 댓글 ID> --video <영상 ID> --expect-title "근수저"
+  python pinned.py post --text "1등" --video <영상 ID> --expect-title "어깨"
 
 - inspect: 지정한 영상들 + 최근 업로드 영상들의 운영자 본인 최상위 댓글을 원문 그대로(repr) 출력. 아무것도 바꾸지 않음
 - apply: source 댓글 본문(textOriginal)을 글자 하나 바꾸지 않고 target 댓글에 덮어씀. 수정 후 다시 읽어서 같은지 확인
-- post: source 댓글 본문을 그대로 영상에 새 댓글로 담. 같은 본문의 운영자 댓글이 이미 있으면 달지 않음.
+- post: source 댓글 본문(또는 --text 로 준 본문)을 그대로 영상에 새 댓글로 담. 같은 본문의 운영자 댓글이 이미 있으면 달지 않음.
   --expect-title 을 주면 영상 제목에 그 문구가 없을 때 중단 (엉뚱한 영상에 다는 것 방지)
 - YouTube API 는 댓글 고정·고정 해제를 지원하지 않고, 어떤 댓글이 고정인지도 알려주지 않음.
   그래서 고정 여부는 스튜디오에서 직접 확인해야 함 (관련성 순 첫 댓글을 참고용으로만 출력)
@@ -134,11 +135,14 @@ def apply(youtube, channel_id: str, source: str, target: str):
     raise SystemExit("수정 요청은 성공했지만 다시 읽은 본문이 원본과 다름 — 확인 필요")
 
 
-def post(youtube, channel_id: str, source: str, video_id: str, expect_title: str):
-    src = get_comment(youtube, source)
-    if not src or src["snippet"].get("authorChannelId", {}).get("value") != channel_id:
-        raise SystemExit(f"원본 댓글이 없거나 운영자 본인 댓글이 아님: {source}")
-    text = src["snippet"]["textOriginal"]
+def post(youtube, channel_id: str, source: str, video_id: str, expect_title: str, text: str = ""):
+    if bool(source) == bool(text):
+        raise SystemExit("--source 와 --text 중 하나만 줘야 함")
+    if source:
+        src = get_comment(youtube, source)
+        if not src or src["snippet"].get("authorChannelId", {}).get("value") != channel_id:
+            raise SystemExit(f"원본 댓글이 없거나 운영자 본인 댓글이 아님: {source}")
+        text = src["snippet"]["textOriginal"]
     info = youtube.videos().list(part="snippet,status", id=video_id).execute().get("items", [])
     if not info:
         raise SystemExit(f"영상을 찾지 못함: {video_id}")
@@ -146,7 +150,7 @@ def post(youtube, channel_id: str, source: str, video_id: str, expect_title: str
     log.info(f"대상 영상 {video_id} | 공개 {privacy} | {title}")
     if expect_title and expect_title not in title:
         raise SystemExit(f"영상 제목에 '{expect_title}' 가 없음 — 중단")
-    log.info(f"원본 {source}: {text!r}")
+    log.info(f"원본 {source}: {text!r}" if source else f"직접 준 본문: {text!r}")
     for c in operator_threads(youtube, video_id, channel_id):
         if c["snippet"].get("textOriginal") == text:
             log.info(f"같은 본문의 운영자 댓글이 이미 있음: id={c['id']} — 새로 달지 않음")
@@ -162,9 +166,9 @@ def post(youtube, channel_id: str, source: str, video_id: str, expect_title: str
         got = now["snippet"]["textOriginal"] if now else None
         log.info(f"새 댓글 ({wait}초 뒤 읽음): {got!r}")
         if got == text:
-            log.info("작성 완료: 원본과 글자 하나까지 같음. 고정은 YouTube 앱·스튜디오에서 직접 해야 함")
+            log.info("작성 완료: 요청한 본문과 글자 하나까지 같음. 고정은 YouTube 앱·스튜디오에서 직접 해야 함")
             return
-    raise SystemExit("작성 요청은 성공했지만 다시 읽은 본문이 원본과 다름 — 확인 필요")
+    raise SystemExit("작성 요청은 성공했지만 다시 읽은 본문이 요청과 다름 — 확인 필요")
 
 
 def main():
@@ -176,7 +180,8 @@ def main():
     p_ap.add_argument("--source", required=True)
     p_ap.add_argument("--target", required=True)
     p_po = sub.add_parser("post")
-    p_po.add_argument("--source", required=True)
+    p_po.add_argument("--source", default="", help="본문을 가져올 운영자 댓글 ID")
+    p_po.add_argument("--text", default="", help="--source 대신 직접 쓸 본문")
     p_po.add_argument("--video", required=True)
     p_po.add_argument("--expect-title", default="")
     args = parser.parse_args()
@@ -188,7 +193,7 @@ def main():
     elif args.cmd == "apply":
         apply(youtube, channel_id, args.source, args.target)
     else:
-        post(youtube, channel_id, args.source, args.video, args.expect_title)
+        post(youtube, channel_id, args.source.strip(), args.video.strip(), args.expect_title, args.text.strip())
 
 
 if __name__ == "__main__":
